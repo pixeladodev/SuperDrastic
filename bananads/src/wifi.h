@@ -64,7 +64,6 @@ bool wfc_settings_get(const melonDS::Firmware& fw, std::vector<uint8_t>& out);
 // file of the wrong size is set aside as <path>.bad. 1 loaded, 0 no file, -1 not usable
 int wfc_settings_load(melonDS::Firmware& fw, const std::string& path);
 
-
 // Wraps another NetDriver (slirp). DNS queries to slirp's DNS address go to `upstream` instead.
 class WfcDns : public melonDS::NetDriver {
 public:

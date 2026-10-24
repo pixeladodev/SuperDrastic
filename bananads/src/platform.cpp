@@ -215,15 +215,18 @@ void WriteDateTime(int, int, int, int, int, int, void*) {}   // the DS's clock f
 // sees no other DS nearby.
 
 #ifdef BANANADS_LAN
-void MP_Begin(void*) { MPInterface::Get().Begin(0); }
-void MP_End(void*) { MPInterface::Get().End(0); }
-int MP_SendPacket(u8* d, int l, u64 ts, void*) { return MPInterface::Get().SendPacket(0, d, l, ts); }
-int MP_RecvPacket(u8* d, u64* ts, void*) { return MPInterface::Get().RecvPacket(0, d, ts); }
-int MP_SendCmd(u8* d, int l, u64 ts, void*) { return MPInterface::Get().SendCmd(0, d, l, ts); }
-int MP_SendReply(u8* d, int l, u64 ts, u16 aid, void*) { return MPInterface::Get().SendReply(0, d, l, ts, aid); }
-int MP_SendAck(u8* d, int l, u64 ts, void*) { return MPInterface::Get().SendAck(0, d, l, ts); }
-int MP_RecvHostPacket(u8* d, u64* ts, void*) { return MPInterface::Get().RecvHostPacket(0, d, ts); }
-u16 MP_RecvReplies(u8* d, u64 ts, u16 m, void*) { return MPInterface::Get().RecvReplies(0, d, ts, m); }
+// (a frame run ahead, Emu::hidden: nothing goes out or is taken in, as with Net_*; run-ahead is off while a LAN
+// session or discovery is on, Emu::runahead_ok)
+static bool mp_hidden(void* u) { return u && Emu::from(u)->hidden(); }
+void MP_Begin(void* u) { if (!mp_hidden(u)) MPInterface::Get().Begin(0); }
+void MP_End(void* u) { if (!mp_hidden(u)) MPInterface::Get().End(0); }
+int MP_SendPacket(u8* d, int l, u64 ts, void* u) { return mp_hidden(u) ? l : MPInterface::Get().SendPacket(0, d, l, ts); }
+int MP_RecvPacket(u8* d, u64* ts, void* u) { return mp_hidden(u) ? 0 : MPInterface::Get().RecvPacket(0, d, ts); }
+int MP_SendCmd(u8* d, int l, u64 ts, void* u) { return mp_hidden(u) ? l : MPInterface::Get().SendCmd(0, d, l, ts); }
+int MP_SendReply(u8* d, int l, u64 ts, u16 aid, void* u) { return mp_hidden(u) ? l : MPInterface::Get().SendReply(0, d, l, ts, aid); }
+int MP_SendAck(u8* d, int l, u64 ts, void* u) { return mp_hidden(u) ? l : MPInterface::Get().SendAck(0, d, l, ts); }
+int MP_RecvHostPacket(u8* d, u64* ts, void* u) { return mp_hidden(u) ? 0 : MPInterface::Get().RecvHostPacket(0, d, ts); }
+u16 MP_RecvReplies(u8* d, u64 ts, u16 m, void* u) { return mp_hidden(u) ? 0 : MPInterface::Get().RecvReplies(0, d, ts, m); }
 #else
 void MP_Begin(void*) {}
 void MP_End(void*) {}
