@@ -4,20 +4,19 @@ BananaDS plays a DS game's local wireless (tested with Mario Kart DS's local gro
 handhelds, or a handheld and desktop melonDS 1.0/1.1, on the same Wi-Fi network, through melonDS's LAN (ENet, UDP
 7064 for the game and 7063 for the hosts' broadcasts, once a second). It needs `-DBANANADS_LAN=ON` and libenet
 (BananaLinux builds it so); local wireless stays off until `wifi.local` or the in-game menu asks for it. The
-settings are in [SETTINGS.md](SETTINGS.md) (`wifi.local`, `wifi.local_players`, `wifi.local_link`,
-`firmware.nickname`). Without a router, the consoles can also link directly (Connection: Direct, below).
+settings are in [SETTINGS.md](SETTINGS.md) (`wifi.local`, `wifi.local_players`, `firmware.nickname`).
+This build always uses the network the console is already on. It has no Connection row and it does not call
+`wifi-link`. A saved `wifi.local_link` is ignored. The latency warning is hidden when an address is in
+`10.42.0.0/16` (another app's direct link). Hosts are found by a broadcast to `255.255.255.255` (melonDS
+`LAN::ProcessDiscovery`), so any subnet works, including `10.42.0.0/16`.
 
 Desktop melonDS's own LAN dialog warns, and so does the menu's page: LAN requires low network latency to work; do
 not expect it to work through a VPN or any sort of tunnel.
 
 ## The in-game menu's Local multiplayer page (Quick settings > Local multiplayer)
 
-- **Connection: Router / Direct**, the first row in every mode (only when the direct link's script is there,
-  below; changed only with the mode Off, kept in `wifi.local_link`; the cursor opens on Mode, under it): Router
-  plays over the Wi-Fi network the console is on; Direct links the consoles without a router. Direct is the
-  default when the script is there and `wifi.local_link` isn't set; a kept `router` or `direct` is respected, and
-  without the script there is no row and the console plays over its router. To play: Connection, then Mode (Host
-  on one console, Join or Auto on the others); there is no one-press shortcut.
+- **No Connection row.** Mode is the first row. Play is over the Wi-Fi network the console is on: Host on one,
+  Join or Auto on the others.
 - **Mode: Off / Auto / Host / Join**, changed while the game runs, without a restart, and kept in `bananads.conf`
   (`wifi.local = off | auto | host | join`; `join` looks for hosts at the start, `join:<address>` joins that host
   directly). `BANANADS_WIFI_LOCAL` / `BANANADS_WIFI_LOCAL_PLAYERS` in the environment still win at each start, and
@@ -25,9 +24,8 @@ not expect it to work through a VPN or any sort of tunnel.
 - **Players** (2-16, 4 by default, `wifi.local_players`): only with Host on the Mode row; greyed, "Turn Host on to
   change it", until Host is on, and while others are in its session. Auto hosts with the same count.
 - **Hosts found** (Join only): the hosts heard on the network, with their name, players and address; A joins one
-  ("Connecting..." for up to 5 s; the page says why a join failed, and goes on looking). With Direct the page is
-  **Nearby consoles**: each host by its DS name, in larger type, with its players (1/4), without its 10.42.x
-  address; empty, it says what to do on the other console (Local multiplayer, Connection Direct, Mode Host).
+  ("Connecting..." for up to 5 s; the page says why a join failed, and goes on looking). The list is always
+  "Hosts on this network". There is no Nearby consoles list and no direct-link progress.
 - **Disconnect** (only on the Mode row of the mode that is on, Host or Join): a host's session ends; a player goes
   back to looking for hosts. Auto has none: Off leaves at once, and Auto again starts afresh.
 - A status box: what the mode is doing, the session's players with their ping, desktop melonDS's warning (with
@@ -40,8 +38,13 @@ not expect it to work through a VPN or any sort of tunnel.
   Off (Auto) or Disconnect works, after a question.
 - Without a network (an interface up and running with an IPv4 address, looked for every second) nothing starts:
   Quick settings' row says "No Wi-Fi" and doesn't open, the mode is kept, and it starts again when the network is
-  back. A session ends when the network goes. Nintendo WFC (slirp) isn't affected. With a Connection row the page
-  opens anyway, as Direct needs no network.
+  back. A session ends when the network goes. Nintendo WFC (slirp) isn't affected. Without a network the page
+  does not open.
+
+## Direct link (not in this build)
+
+The rest of this section describes Connection: Direct, which this branch does not build in. That behavior is on
+`local-multiplayer-0.5.0.1`. This build never runs `wifi-link`.
 
 ## Direct link (Connection: Direct)
 

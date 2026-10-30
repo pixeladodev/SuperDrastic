@@ -855,7 +855,7 @@ static int lan_poll(void) {   /* the frontend's state into LS; 1: it changed */
     if (!memcmp(&n, &LS, sizeof n)) return lk_changed;
     LS = n; return 1;
 }
-static int lan_link_row(void) { return LS.link_avail && H.lan_link_set; }
+static int lan_link_row(void) { return 0; }   /* no Connection row: this build always uses the current network */
 /* Quick settings' row doesn't open: no Wi-Fi, and no Connection row to pick Direct (which needs none) */
 static int lan_closed(void) { return LS.no_net && !lan_link_row(); }
 /* Connection: only with the mode Off (a mode on would have to start again on the other connection) */
@@ -865,7 +865,7 @@ static const char *lan_addr_name(const char *a) {
     for (int i = 0; i < LS.nhosts; i++) if (!strcmp(LS.hosts[i].addr, a)) return LS.hosts[i].name;
     return "";
 }
-static int lan_linking(void) { return LS.link && LS.mode != BM_LAN_OFF && LS.link_state == BM_LINK_STARTING; }
+static int lan_linking(void) { return 0; }   /* no direct-link phases on this page */
 /* Connection first (it is on the page in every mode, Off included, and is picked before a mode), then Mode; the
  * cursor starts on Mode (lan_mode_row): Connection changes only with Off, Mode is what a visit is mostly for */
 static void lan_rows(void) {
@@ -1275,7 +1275,7 @@ static void draw_bottom(void) {
             text(c, &F_REG, "While the direct link is on, this console has no internet.", x0 + S(18), gy1 - S(74), S(15), C_CYAN, tw, 0);
             text(c, &F_REG, "Your Wi-Fi comes back with Off, or when you quit the game.", x0 + S(18), gy1 - S(52), S(15), C_CYAN, tw, 0);
         }
-        else if (!LS.link && lan_pick != BM_LAN_OFF && ty + S(20) <= gy1 - S(74)) {   /* desktop melonDS's LAN warning (Router only), above the name */
+        else if (!LS.link && !LS.on_direct_net && lan_pick != BM_LAN_OFF && ty + S(20) <= gy1 - S(74)) {   /* desktop melonDS's LAN warning, not on 10.42.0.0/16 */
             text(c, &F_REG, "Warning: LAN requires low network latency to work.", x0 + S(18), gy1 - S(74), S(15), C_CYAN, tw, 0);
             text(c, &F_REG, "Do not expect it to work through a VPN or any sort of tunnel.", x0 + S(18), gy1 - S(52), S(15), C_CYAN, tw, 0);
         }
@@ -1288,15 +1288,9 @@ static void draw_bottom(void) {
         char sub[64];
         if (LS.state == BM_LAN_BUSY && LS.addr[0]) snprintf(sub, sizeof sub, "Connecting...");
         else snprintf(sub, sizeof sub, "%d found", LS.nhosts);
-        draw_header(c, LS.link ? "Nearby consoles" : "Hosts on this network", sub, 1);
+        draw_header(c, "Hosts on this network", sub, 1);
         const int n = LS.nhosts;
-        if (!n && LS.link) {   /* Direct: the other consoles on Direct too (no computer: it isn't on the link) */
-            const char *l[] = { lan_linking() ? "Starting the direct link..." : "Looking for hosts...", "",
-                "On the other console: Local multiplayer,", "Connection Direct, Mode Host.",
-                "No router: the consoles link directly. A host", "shows up here within a few seconds." };
-            for (int i = 0; i < 6; i++)
-                text(c, i ? &F_REG : &F_MED, l[i], gx0 + S(8), gy0 + S(16) + i * S(30), i ? S(17) : S(21), i ? C_BODY : C_LIGHT, gx1 - gx0 - S(16), 0);
-        } else if (!n) {
+        if (!n) {
             const char *l[] = { "Looking for hosts...", "",
                 "On the other console: Local multiplayer > Host.", "On a computer: melonDS, Multiplayer > Host LAN game.",
                 "Both on the same Wi-Fi network. A host shows up", "here within a second or two." };
@@ -1316,12 +1310,11 @@ static void draw_bottom(void) {
                 int sel = i == sel_host;
                 R_ROW[r] = (rect){ gx0, y, gx1, y + rh };
                 box(c, gx0, y, gx1, y + rh, S(10), bw, sel ? C_LIGHT : C_LINE, sel ? C_BLUE : C_PANEL);
-                char v[96];   /* Direct: the players alone (the link's 10.42.x address says nothing) */
-                if (LS.link) snprintf(v, sizeof v, "%d/%d", LS.hosts[i].players, LS.hosts[i].max);
-                else snprintf(v, sizeof v, "%d/%d  %s", LS.hosts[i].players, LS.hosts[i].max, LS.hosts[i].addr);
+                char v[96];
+                snprintf(v, sizeof v, "%d/%d  %s", LS.hosts[i].players, LS.hosts[i].max, LS.hosts[i].addr);
                 float vw = text_w_raw(&F_REG, v, S(16), 99);
                 text_raw(c, &F_REG, v, gx1 - S(14), y + (rh - S(16)) / 2.0f - S(1), S(16), sel ? C_ONSEL : C_CYAN, 0, 2);
-                const int ns = LS.link ? S(22) : S(19);   /* Direct: the host's DS name, bigger */
+                const int ns = S(19);
                 text_raw(c, &F_MED, LS.hosts[i].name, gx0 + S(16), y + (rh - ns) / 2.0f - S(1), ns,
                          sel ? C_ONSEL : C_LIGHT, gx1 - gx0 - vw - S(44), 0);
                 y += rh + gap;
@@ -1331,7 +1324,7 @@ static void draw_bottom(void) {
                 int t0 = ty0 + (int)((long long)(ty1 - ty0 - th) * top_host / (n - vis));
                 fill(c, gx1 + S(6), t0, gx1 + S(10), t0 + th, C_GREY, 1.0f);
             }
-            text(c, &F_REG, LS.state == BM_LAN_BUSY && LS.addr[0] ? "Connecting: it can take up to 5 s" : LS.link ? "A to join; players / the most" : "A to join; players / the most, and the host's address",
+            text(c, &F_REG, LS.state == BM_LAN_BUSY && LS.addr[0] ? "Connecting: it can take up to 5 s" : "A to join; players / the most, and the host's address",
                  gx0 + S(4), y + S(4), S(15), C_GREY, gx1 - gx0, 0);
         }
     }
