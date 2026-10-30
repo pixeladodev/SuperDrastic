@@ -3,7 +3,7 @@
 BananaDS plays a DS game's local wireless (tested with Mario Kart DS's local groups and races; other games are untested) between
 handhelds, or a handheld and desktop melonDS 1.0/1.1, on the same Wi-Fi network, through melonDS's LAN (ENet, UDP
 7064 for the game and 7063 for the hosts' broadcasts, once a second). It needs `-DBANANADS_LAN=ON` and libenet
-(BananaLinux builds it so); local wireless stays off until `wifi.local` or the in-game menu asks for it. The
+(BananaLinux builds it so). With no saved `wifi.local`, local wireless starts in Auto; a saved value is kept. The
 settings are in [SETTINGS.md](SETTINGS.md) (`wifi.local`, `wifi.local_players`, `firmware.nickname`).
 This build always uses the network the console is already on. It has no Connection row and it does not call
 `wifi-link`. A saved `wifi.local_link` is ignored. The latency warning is hidden when an address is in
