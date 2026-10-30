@@ -185,7 +185,8 @@ void Emu::setup_wifi() {
 // Local multiplayer page) on the other, or auto on both (lan_auto_tick). Both on the same network. The menu can
 // change it while the game runs (lan_request).
 void Emu::setup_local() {
-    const std::string mode = cfg_.str("wifi.local", "off");
+    // No saved wifi.local: Auto. A value the user saved (off, host, join) stays as it is.
+    const std::string mode = cfg_.str("wifi.local", "auto");
 #ifdef BANANADS_LAN
     {
         std::lock_guard<std::mutex> l(lan_mu_);
