@@ -2018,6 +2018,7 @@ static int mh_lan_get(void*, bmenu_lan* st) {
     st->phase = phases[(int)l.phase];
     st->untagged = l.host_untagged;
     st->no_net = l.no_net;
+    st->on_direct_net = l.on_direct_net;
     st->state = l.state == Emu::LanState::Busy ? BM_LAN_BUSY : l.state == Emu::LanState::Ready ? BM_LAN_READY
               : l.state == Emu::LanState::Failed ? BM_LAN_FAILED : BM_LAN_IDLE;
     st->max_players = l.max_players;

@@ -195,27 +195,16 @@ void Emu::setup_local() {
     }
     lan_read_test_modes();
     lan_st_built_ = true;
-    {   // the direct link: the script the multiplayer app installs (BANANADS_LINK_SCRIPT overrides it, to test another)
-        const std::string script = cfg_.str("link.script", "/data/store/apps/bananads-mp/wifi-link");
-        if (DirectLink::usable(script)) link_ = std::make_unique<DirectLink>(script, (int)cfg_.num("wifi.local_link_channel", 0));
-        // (Direct by default when the script is there: the steadier of the two on the handhelds; a saved
-        // wifi.local_link = router still wins)
-        link_direct_ = link_ && cfg_.str("wifi.local_link", "direct") == "direct";
+    // This build plays on the network the console is already on. It does not call wifi-link, and it ignores
+    // link.script, BANANADS_LINK_SCRIPT and a saved wifi.local_link.
+    {
         std::lock_guard<std::mutex> l(lan_mu_);
-        lan_st_.link_avail = link_ != nullptr;
-        lan_st_.link_direct = link_direct_;
+        lan_st_.link_avail = false;
+        lan_st_.link_direct = false;
     }
-    if (link_)
-        Log(LogLevel::Info, "[wifi] local wireless connection: %s (direct link: %s)\n", link_direct_ ? "direct" : "router",
-            link_->script().c_str());
+    Log(LogLevel::Info, "[wifi] local wireless: the network this console is on\n");
     lan_net_check(true);
     if (mode == "off") return;
-    if (link_direct_) {
-        // Direct takes the console off its Wi-Fi network: only when picked on the LAN page, never by itself at a start
-        Log(LogLevel::Info, "[wifi] local wireless %s with the direct link: not started at the start (pick it on the LAN page)\n",
-            mode.c_str());
-        return;
-    }
     const bool manual = mode == "host" || mode == "join" || mode.rfind("join:", 0) == 0;
     if (manual && lan_net_wait(mode == "host" ? LanMode::Host : LanMode::Join, mode.size() > 5 ? mode.substr(5) : "",
                                lan_status().max_players))
@@ -369,6 +358,22 @@ void Emu::lan_apply_one(const LanReq& r) {
 }
 
 #ifdef BANANADS_LAN
+// 10.42.0.0/16 is BananaOS Direct Link's range. The latency warning stays off there: that network is the
+// consoles' own link, not a router or a tunnel.
+static bool ipv4_on_direct_net() {
+    struct ifaddrs* ifs = nullptr;
+    if (getifaddrs(&ifs) != 0) return false;
+    bool yes = false;
+    for (struct ifaddrs* i = ifs; i && !yes; i = i->ifa_next) {
+        if (!i->ifa_addr || i->ifa_addr->sa_family != AF_INET) continue;
+        if (!(i->ifa_flags & IFF_UP) || (i->ifa_flags & IFF_LOOPBACK)) continue;
+        const uint32_t a = ntohl(reinterpret_cast<sockaddr_in*>(i->ifa_addr)->sin_addr.s_addr);
+        if ((a & 0xFFFF0000u) == 0x0A2A0000u) yes = true;
+    }
+    freeifaddrs(ifs);
+    return yes;
+}
+
 // A network to play on: an interface other than loopback that is up and running (on the handheld, wlan0 connected:
 // BananaOS keeps its address after a disconnect, but not the RUNNING flag) with an IPv4 address. Its name, or "".
 static std::string usable_net() {
@@ -391,6 +396,11 @@ void Emu::lan_net_check(bool now) {
     const uint64_t t = now_us();
     if (!now && t - net_check_us_ < 1000000) return;
     net_check_us_ = t;
+    {
+        const bool direct_net = ipv4_on_direct_net();
+        std::lock_guard<std::mutex> l(lan_mu_);
+        lan_st_.on_direct_net = direct_net;
+    }
     if (link_direct_) {
         // Direct: the home Wi-Fi doesn't matter; the link does (up, and our address still there: a sleep, or
         // anything else that took it down, ends the mode)
