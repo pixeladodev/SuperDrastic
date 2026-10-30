@@ -4,7 +4,7 @@ Date: Wed, 28 Oct 2026 23:59:11 -0500
 Subject: [PATCH] LAN: respuesta-temprana, a MP client's reply sent as the
  host's CMD arrives
 
-With BANANADS_LAN_EARLY_REPLY=1 (off by default), as a MP client: the
+On by default (BANANADS_LAN_EARLY_REPLY=0 turns it off), as a MP client: the
 reply to the host's CMD goes out from CheckRX as the CMD arrives, built
 as the end of its emulated reception would build it (the reply slot's
 frame with SendMPReply's checks and TXSendFrame's sequence number,
@@ -26,7 +26,7 @@ index 6b0d9dc..ac331f8 100644
  
  // BananaDS diagnostics: Debug level (BananaDS log.level 0), "[diag]" prefix, each category at most N lines a second
  // (the lines held back are counted and reported with the category's next line)
-+// BananaDS respuesta-temprana (BANANADS_LAN_EARLY_REPLY=1; off by default): as a MP client, the reply to the host's
++// BananaDS respuesta-temprana (on by default; BANANADS_LAN_EARLY_REPLY=0 turns it off): as a MP client, the reply to the host's
 +// CMD goes out as soon as the CMD reaches us (CheckRX) instead of at the end of its emulated reception. It is built
 +// the way the end of the reception would: the reply slot's frame (W_TXSlotReply1, with SendMPReply's checks) with
 +// TXSendFrame's sequence number, retry bit, WEP FCS and channel, else the default empty reply, or the blank one if
@@ -43,8 +43,8 @@ index 6b0d9dc..ac331f8 100644
 +    if (v < 0)
 +    {
 +        const char* e = getenv("BANANADS_LAN_EARLY_REPLY");
-+        v = (e && e[0] == '1' && !e[1]) ? 1 : 0;
-+        if (v) Log(LogLevel::Info, "LAN: MP early reply on (BANANADS_LAN_EARLY_REPLY)\n");
++        v = (e && e[0] == '0' && !e[1]) ? 0 : 1;
++        Log(LogLevel::Info, "LAN: MP early reply %s\n", v ? "on" : "off (BANANADS_LAN_EARLY_REPLY=0)");
 +    }
 +    return v;
 +}

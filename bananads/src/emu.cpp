@@ -195,8 +195,8 @@ void Emu::setup_local() {
     }
     lan_read_test_modes();
     lan_st_built_ = true;
-    {   // the direct link: BananaOS's wifi-link (link.script = BANANADS_LINK_SCRIPT for another one, to test it)
-        const std::string script = cfg_.str("link.script", "/usr/libexec/banana/wifi-link");
+    {   // the direct link: the script the multiplayer app installs (BANANADS_LINK_SCRIPT overrides it, to test another)
+        const std::string script = cfg_.str("link.script", "/data/store/apps/bananads-mp/wifi-link");
         if (DirectLink::usable(script)) link_ = std::make_unique<DirectLink>(script, (int)cfg_.num("wifi.local_link_channel", 0));
         // (Direct by default when the script is there: the steadier of the two on the handhelds; a saved
         // wifi.local_link = router still wins)

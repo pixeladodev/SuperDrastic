@@ -47,8 +47,9 @@ not expect it to work through a VPN or any sort of tunnel.
 
 Tried by hand on an RG DS and an RG DS Plus (BananaOS 0.5.0.1, 2026-10-29): several games played over the link,
 steadier than over the home router there. Auto with Direct, a sleep with the link up and more than two consoles
-are still untested. With Direct, Host, Join and Auto first run `link.script` (BananaLinux:
-`/usr/libexec/banana/wifi-link`; `BANANADS_LINK_SCRIPT` in the environment overrides it) as
+are still untested. With Direct, Host, Join and Auto first run `link.script`
+(`/data/store/apps/bananads-mp/wifi-link`, the copy the multiplayer app installs;
+`BANANADS_LINK_SCRIPT` in the environment overrides it) as
 `/bin/sh <script> up host|join --owner <BananaDS's pid> [--channel N]` on a thread of its own, wait for it (up to
 60 s; the status box shows its progress, below) and then use the link for the hosts'
 broadcasts and ENet as on a router. The script:
@@ -145,7 +146,7 @@ own screens) ends its session and waits; with others in it, after 30 s off. A UD
   802.11 offsets of up to 4 `arr` samples), `len`, `notready` (no valid slot then, one at the reply), `gone` (the
   reverse), `nosnap`; `validatarr`; `slot1 writes` (of `W_TXSlotReply1`, its latch and reset included) and `buf
   writes` (into the snapshotted frame) between the CMD's arrival and the reply, and in how many replies.
-- **0099** (LAN, respuesta-temprana; off unless `BANANADS_LAN_EARLY_REPLY=1`): a child sends its reply to the host's
+- **0099** (LAN, respuesta-temprana; on unless `BANANADS_LAN_EARLY_REPLY=0`): a child sends its reply to the host's
   CMD from `CheckRX` as the CMD arrives, instead of at the end of the CMD's emulated reception, built as that end
   would: the reply slot's frame (`SendMPReply`'s checks, `TXSendFrame`'s sequence number, retry bit, WEP FCS and
   channel), else the default empty reply, or the blank one if the CMD isn't for us; stamped with the time the
