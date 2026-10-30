@@ -158,8 +158,8 @@ public:
         AutoPhase phase = AutoPhase::Wait;  // Auto: where it is
         bool host_untagged = false;      // Auto, joined: a host that doesn't say its game (desktop melonDS)
         bool no_net = false;             // no network (Wi-Fi off or not connected): the mode waits for one
-        // Connection (wifi.local_link): router (the Wi-Fi network, as before) or direct (DirectLink, wifi.h: the
-        // consoles on a cell of their own, no router; this one off its Wi-Fi network meanwhile)
+        bool on_direct_net = false;      // an address in 10.42.0.0/16 (another app's direct link): no latency warning
+        // Connection is not in this build. These stay false; the page always uses the network the console is on.
         bool link_avail = false;         // the link script is there (link.script): the page has a Connection row
         bool link_direct = false;        // Connection: Direct
         int link_state = 0;              // DirectLink::State (0 down, 1 starting, 2 up, 3 stopping, 4 failed)

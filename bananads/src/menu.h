@@ -44,6 +44,7 @@ typedef struct {
     int phase;            /* auto: BM_AUTO_* */
     int untagged;         /* auto, joined: the host doesn't say its game (desktop melonDS) */
     int no_net;           /* no network (Wi-Fi off or not connected): nothing starts; the mode is kept */
+    int on_direct_net;    /* an address in 10.42.0.0/16: hide the router's latency warning */
     int host_players;     /* Host's size (wifi.local_players, 2-16): a session Host or Auto starts */
     /* Connection (wifi.local_link): Router (this Wi-Fi network) or Direct (the consoles linked without a router,
      * BananaOS's wifi-link; this console off its Wi-Fi network, so without internet, while it is up) */
