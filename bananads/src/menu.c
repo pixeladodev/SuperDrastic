@@ -748,7 +748,7 @@ static void draw_top(void) {
             y += S(16);
             text(c, &F_MED, "BUTTONS", L, y, S(14), C_TEALTXT, 0, 0);
             y += S(28);
-            static const char *const keys[][2] = { { "F / L3", "this menu" }, { "F + R", "save to slot 1" },
+            static const char *const keys[][2] = { { "F / HOME", "this menu" }, { "F + R", "save to slot 1" },
                                                    { "F + L", "load slot 1" }, { "F + START", "save your spot and quit" } };
             for (int i = 0; i < 4 && y + S(24) <= y1 - S(12); i++, y += S(30)) {
                 float kw = text_w(&F_MED, keys[i][0], S(15), 99) + S(14);
@@ -898,7 +898,7 @@ static void draw_bottom(void) {
             mq_pick = sel; text(c, &F_MED, tile_label[i], x + tw / 2.0f, cy + S(60), S(20), fg, tw - S(16), 1); mq_pick = 0;
             char h[64] = "";
             switch (i) {
-            case 0: snprintf(h, sizeof h, "or press F / L3"); break;
+            case 0: snprintf(h, sizeof h, "or press F / HOME"); break;
             case 1: snprintf(h, sizeof h, "%d slots", NSLOT); break;
             case 2: if (nb >= 0) snprintf(h, sizeof h, "last: slot %d", nb + 1); else snprintf(h, sizeof h, "no saves yet"); break;
             case 3: snprintf(h, sizeof h, H.opt_count && H.opt_count(H.ctx) ? "volume, shader, effects" : "volume, brightness"); break;
