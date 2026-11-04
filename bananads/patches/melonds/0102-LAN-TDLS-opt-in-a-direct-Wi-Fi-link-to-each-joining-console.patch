@@ -1,0 +1,163 @@
+From a2cc02a46a1ce16872fe8b2798f82c48c0c07279 Mon Sep 17 00:00:00 2001
+From: pixeladodev <350114043+pixeladodev@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 03:29:29 -0500
+Subject: [PATCH] LAN: TDLS, a direct Wi-Fi link from the host to each console
+ that joins (opt-in: BANANADS_LAN_TDLS=1)
+
+---
+ src/net/LAN.cpp | 125 ++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 125 insertions(+)
+
+diff --git a/src/net/LAN.cpp b/src/net/LAN.cpp
+index 07b23ac..f62c46f 100644
+--- a/src/net/LAN.cpp
++++ b/src/net/LAN.cpp
+@@ -359,6 +359,128 @@ void LAN::EndDiscovery()
+         Active = false;
+ }
+ 
++#ifndef _WIN32
++#include <sys/un.h>
++#include <sys/time.h>
++#include <arpa/inet.h>
++
++// BananaDS: off by default; with BANANADS_LAN_TDLS=1 the host asks wpa_supplicant for a TDLS link with each console that joins when they
++// are on the same Wi-Fi network: their packets then go straight from one console to the other instead of through the
++// access point, which in our measurements cut the round trip by about 1.5 ms and brought home Wi-Fi to Direct Link's
++// frame rate, but on the RTL8821CS it also brought bursts of late packets that ended Mario Kart DS sessions (5 of
++// 8 games), so it stays opt-in. Only in station mode (Direct Link is IBSS and goes direct already); any failure leaves things as they are.
++static char BananaTdlsPeers[16][18] = {};
++
++// One command to wpa_supplicant's control socket; returns the reply length, or -1.
++static int BananaWpaCmd(const char* cmd, char* reply, size_t replylen)
++{
++    const char* ifname = getenv("BANANADS_LAN_TDLS_IF");
++    if (!ifname || !*ifname) ifname = "wlan0";
++    const char* dirs[] = {"/run/wpa_supplicant", "/var/run/wpa_supplicant"};
++    for (const char* dir : dirs)
++    {
++        struct sockaddr_un dst = {};
++        dst.sun_family = AF_UNIX;
++        snprintf(dst.sun_path, sizeof(dst.sun_path), "%s/%s", dir, ifname);
++        if (access(dst.sun_path, F_OK) != 0) continue;
++
++        int s = socket(AF_UNIX, SOCK_DGRAM, 0);
++        if (s < 0) return -1;
++        struct sockaddr_un local = {};
++        local.sun_family = AF_UNIX;
++        snprintf(local.sun_path, sizeof(local.sun_path), "/tmp/bananads-wpa-%d", (int)getpid());
++        unlink(local.sun_path);
++        int n = -1;
++        if (bind(s, (sockaddr_t*)&local, sizeof(local)) == 0)
++        {
++            struct timeval tv = {1, 0};
++            setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
++            if (connect(s, (sockaddr_t*)&dst, sizeof(dst)) == 0 && send(s, cmd, strlen(cmd), 0) >= 0)
++            {
++                n = (int)recv(s, reply, replylen - 1, 0);
++                if (n >= 0) reply[n] = '\0';
++            }
++            unlink(local.sun_path);
++        }
++        close(s);
++        return n;
++    }
++    return -1;
++}
++
++static void BananaTdlsSetup(u32 peeraddr)
++{
++    const char* e = getenv("BANANADS_LAN_TDLS");
++    if (!e || strcmp(e, "1") != 0) return;
++    struct in_addr ia;
++    ia.s_addr = peeraddr;
++    char ip[INET_ADDRSTRLEN];
++    if (!inet_ntop(AF_INET, &ia, ip, sizeof(ip))) return;
++
++    char buf[4096];
++    if (BananaWpaCmd("STATUS", buf, sizeof(buf)) <= 0 || !strstr(buf, "mode=station"))
++    {
++        Platform::Log(Platform::LogLevel::Info, "LAN: TDLS skipped, Wi-Fi is not in station mode\n");
++        return;
++    }
++
++    // The host's MAC, from the kernel's neighbour table (the connection just exchanged packets with it).
++    char mac[18] = "";
++    FILE* f = fopen("/proc/net/arp", "r");
++    if (f)
++    {
++        char line[256];
++        while (fgets(line, sizeof(line), f))
++        {
++            char aip[64], hw[64], flags[32];
++            if (sscanf(line, "%63s %*s %31s %63s", aip, flags, hw) == 3 && !strcmp(aip, ip)
++                && strtol(flags, nullptr, 16) & 0x2)
++            {
++                snprintf(mac, sizeof(mac), "%s", hw);
++                break;
++            }
++        }
++        fclose(f);
++    }
++    if (!mac[0])
++    {
++        Platform::Log(Platform::LogLevel::Info, "LAN: TDLS skipped, no MAC for %s\n", ip);
++        return;
++    }
++
++    char cmd[64];
++    snprintf(cmd, sizeof(cmd), "TDLS_SETUP %s", mac);
++    int n = BananaWpaCmd(cmd, buf, sizeof(buf));
++    bool ok = n > 0 && !strncmp(buf, "OK", 2);
++    if (ok)
++    {
++        for (auto& slot : BananaTdlsPeers)
++        {
++            if (!strcmp(slot, mac)) break;
++            if (!slot[0]) { snprintf(slot, sizeof(slot), "%s", mac); break; }
++        }
++    }
++    Platform::Log(Platform::LogLevel::Info, "LAN: TDLS with %s (%s): %s\n", ip, mac, ok ? "requested" : "refused");
++}
++
++static void BananaTdlsTeardown()
++{
++    for (auto& slot : BananaTdlsPeers)
++    {
++        if (!slot[0]) continue;
++        char cmd[64], buf[256];
++        snprintf(cmd, sizeof(cmd), "TDLS_TEARDOWN %s", slot);
++        int n = BananaWpaCmd(cmd, buf, sizeof(buf));
++        Platform::Log(Platform::LogLevel::Info, "LAN: TDLS with %s ended: %s\n", slot,
++            n > 0 && !strncmp(buf, "OK", 2) ? "ok" : "failed");
++        slot[0] = '\0';
++    }
++}
++#else
++static void BananaTdlsSetup(u32) {}
++static void BananaTdlsTeardown() {}
++#endif
++
+ // BananaDS: the session's UDP packets are marked with DSCP 46 (EF) by default; BANANADS_LAN_DSCP (0-63, in
+ // /data/banana/bananads.env) picks another, 0 turns it off. With 46: Linux's Wi-Fi stack and most access points then send them in the voice
+ // queue (WMM AC_VO), ahead of the household's other traffic. Discovery broadcasts are left as they are.
+@@ -600,6 +722,7 @@ void LAN::EndSession()
+     enet_host_destroy(Host);
+     Host = nullptr;
+     IsHost = false;
++    BananaTdlsTeardown();
+ 
+     // BananaDS: nothing of this session carries over into the next one (the frontend can end a session and start
+     // another in the same run): its players, who was connected, who was in a DS group with us
+@@ -769,6 +892,8 @@ void LAN::ProcessHostEvent(ENetEvent& event)
+                 break;
+             }
+ 
++            BananaTdlsSetup(event.peer->address.host);
++
+             // client connected; assign player number
+ 
+             int id;
+-- 
+2.56.0
+

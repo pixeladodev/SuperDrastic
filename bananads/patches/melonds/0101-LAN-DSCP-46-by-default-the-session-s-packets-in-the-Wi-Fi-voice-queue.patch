@@ -1,0 +1,67 @@
+From cf2d6e26f025bf11d5ac426638eec665fa7f2a4c Mon Sep 17 00:00:00 2001
+From: pixeladodev <350114043+pixeladodev@users.noreply.github.com>
+Date: Wed, 4 Nov 2026 01:13:47 -0500
+Subject: [PATCH] LAN: the session's packets in the Wi-Fi voice queue (DSCP 46
+ by default, BANANADS_LAN_DSCP picks another or 0 turns it off)
+
+---
+ src/net/LAN.cpp | 22 ++++++++++++++++++++++
+ 1 file changed, 22 insertions(+)
+
+diff --git a/src/net/LAN.cpp b/src/net/LAN.cpp
+index 19933af..07b23ac 100644
+--- a/src/net/LAN.cpp
++++ b/src/net/LAN.cpp
+@@ -31,6 +31,7 @@
+ #else
+     #include <unistd.h>
+     #include <netinet/in.h>
++    #include <netinet/ip.h>
+     #include <sys/select.h>
+     #include <sys/socket.h>
+ 
+@@ -358,6 +359,25 @@ void LAN::EndDiscovery()
+         Active = false;
+ }
+ 
++// BananaDS: the session's UDP packets are marked with DSCP 46 (EF) by default; BANANADS_LAN_DSCP (0-63, in
++// /data/banana/bananads.env) picks another, 0 turns it off. With 46: Linux's Wi-Fi stack and most access points then send them in the voice
++// queue (WMM AC_VO), ahead of the household's other traffic. Discovery broadcasts are left as they are.
++static void BananaSetDSCP(ENetHost* host)
++{
++#ifndef _WIN32
++    const char* e = getenv("BANANADS_LAN_DSCP");
++    if (!host) return;
++    int dscp = (e && *e) ? atoi(e) : 46;
++    if (dscp <= 0 || dscp > 63) return;
++    int tos = dscp << 2;
++    int r = setsockopt(host->socket, IPPROTO_IP, IP_TOS, (const char*)&tos, sizeof(tos));
++    Platform::Log(Platform::LogLevel::Info, "LAN: DSCP %d (TOS 0x%02x) on the session's socket: %s\n", dscp, tos,
++        r == 0 ? "ok" : "failed");
++#else
++    (void)host;
++#endif
++}
++
+ bool LAN::StartHost(const char* playername, int numplayers)
+ {
+     if (!Inited) return false;
+@@ -372,6 +392,7 @@ bool LAN::StartHost(const char* playername, int numplayers)
+     {
+         return false;
+     }
++    BananaSetDSCP(Host);
+ 
+     Platform::Mutex_Lock(PlayersMutex);
+ 
+@@ -410,6 +431,7 @@ bool LAN::StartClient(const char* playername, const char* host)
+     {
+         return false;
+     }
++    BananaSetDSCP(Host);
+ 
+     ENetAddress addr;
+     enet_address_set_host(&addr, host);
+-- 
+2.56.0
+
