@@ -1727,7 +1727,8 @@ bool rom_unmap(uint8_t* p) {
 
 bool Emu::load_rom(const std::string& path) {
     if (nds_) flush_save(true);  // the cart that is about to go: its save first
-    firmware_boot_ = cfg_.str("boot", "game") == "firmware";
+    // (@firmware: the room asking for the DS menu with "play @firmware"; boot=firmware: a launcher asking for it)
+    firmware_boot_ = path == "@firmware" || cfg_.str("boot", "game") == "firmware";
     std::unique_ptr<NDSCart::CartCommon> cart;
     if (firmware_boot_) {  // the DS menu, the cart slot empty: no ROM, no save
         dsi_ = false;
