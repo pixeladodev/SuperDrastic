@@ -182,4 +182,13 @@ own screens) ends its session and waits; with others in it, after 30 s off. A UD
   seconds (black screen, the host's "communication error"), it never read the host's new beacons to join the
   game, and F + START waited for the frame in progress (~10 s). Mario Kart DS ends the download with a deauth,
   which already cleared the flag. A powered-off transceiver keeps no association on the real hardware either.
+- **0105** (LAN, on unless `BANANADS_LAN_ENET_THROTTLE=1`): ENet's packet throttle is kept at its top on every
+  peer (deceleration 0, "LAN: ENet packet throttle off" in the log). ENet drops unreliable and unsequenced packets
+  (all the MP commands, replies and acks) in proportion to how far the throttle is under its limit, and it steps
+  the throttle down each time a reliable round trip (its pings, every 500 ms) comes back slower than the last plus
+  twice its variance, which Wi-Fi through a router does every few seconds (3-33 ms between two handhelds). MP
+  packets are never resent: each one dropped costs the side waiting for it the full MP receive timeout (25 ms). A
+  game that sends several MP commands a frame (Mario Party DS: ~180 a second, against ~55 for Mario Kart DS's
+  race) pays it most. With `BANANADS_LAN_TIMEOUT_MS` set, "[diag] LAN enet:" adds each peer's ENet round trip and
+  throttle (32 of 32: nothing dropped) to the per-second lines.
 - Their other "[diag]" traces log at the Debug level only (`log.level = 0`).

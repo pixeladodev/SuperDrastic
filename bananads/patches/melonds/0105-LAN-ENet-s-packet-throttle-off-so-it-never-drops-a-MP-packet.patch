@@ -1,0 +1,91 @@
+From c5d87425a81686a5d30e9c6bc2f1b6eccdfab9bc Mon Sep 17 00:00:00 2001
+From: Pixelado Dev <350114043+pixeladodev@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 06:58:25 -0500
+Subject: [PATCH] LAN: ENet's packet throttle off, so it never drops a MP
+ packet
+
+---
+ src/net/LAN.cpp | 39 +++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 39 insertions(+)
+
+diff --git a/src/net/LAN.cpp b/src/net/LAN.cpp
+index a733b39..5577fc5 100644
+--- a/src/net/LAN.cpp
++++ b/src/net/LAN.cpp
+@@ -157,6 +157,26 @@ static int EnvTimeoutMS()
+     return v;
+ }
+ 
++// BananaDS: ENet's packet throttle drops unreliable and unsequenced packets (every MP command, reply and ack goes
++// as one) while it is under its limit, and it steps down whenever a reliable round trip comes back slower than the
++// last one plus twice its variance, which a Wi-Fi link does every few seconds. Each dropped MP packet costs a full
++// MP receive timeout on the side that waits for it. MP packets are never resent, so nothing gains from the throttle:
++// it's kept at its top (deceleration 0) on every peer, unless BANANADS_LAN_ENET_THROTTLE=1 (ENet's default).
++static void PeerNoThrottle(ENetPeer* peer)
++{
++    static int keep = -1;
++    if (keep < 0)
++    {
++        const char* e = getenv("BANANADS_LAN_ENET_THROTTLE");
++        keep = (e && e[0] == '1') ? 1 : 0;
++        Platform::Log(Platform::LogLevel::Info, "LAN: ENet packet throttle %s\n",
++            keep ? "as ENet has it (BANANADS_LAN_ENET_THROTTLE=1)" : "off: MP packets are never dropped by it");
++    }
++    if (keep || !peer) return;
++    enet_peer_throttle_configure(peer, ENET_PEER_PACKET_THROTTLE_INTERVAL, ENET_PEER_PACKET_THROTTLE_ACCELERATION, 0);
++    peer->packetThrottle = ENET_PEER_PACKET_THROTTLE_SCALE;
++}
++
+ static void NoteWait(u64 start)
+ {
+     if (!EnvTimeoutMS()) return;
+@@ -634,6 +654,7 @@ bool LAN::StartClient(const char* playername, const char* host)
+             if (conn == 0 && event.type == ENET_EVENT_TYPE_CONNECT)
+             {
+                 conn = 1;
++                landiag::PeerNoThrottle(event.peer);
+             }
+             else if (conn == 1 && event.type == ENET_EVENT_TYPE_RECEIVE)
+             {
+@@ -928,6 +949,7 @@ void LAN::ProcessHostEvent(ENetEvent& event)
+     {
+     case ENET_EVENT_TYPE_CONNECT:
+         {
++            landiag::PeerNoThrottle(event.peer);
+             if ((NumPlayers >= MaxPlayers) || (NumPlayers >= 16))
+             {
+                 // game is full, reject connection
+@@ -1085,6 +1107,7 @@ void LAN::ProcessClientEvent(ENetEvent& event)
+     {
+     case ENET_EVENT_TYPE_CONNECT:
+         {
++            landiag::PeerNoThrottle(event.peer);
+             // another client is establishing a direct connection to us
+ 
+             int playerid = -1;
+@@ -1359,6 +1382,22 @@ void LAN::Process()
+                         landiag::SPre.Mean(), landiag::SPre.P95(),
+                         landiag::SReply.Count, landiag::SReply.Mean(), landiag::SReply.P95(), landiag::SReply.Max / 1000.0);
+             }
++            if (landiag::EnvTimeoutMS() && Host)
++            {
++                // ENet's view of each peer: its smoothed round trip (reliable packets) and the packet throttle (32: none dropped)
++                char pb[256];
++                int pn = 0;
++                pb[0] = 0;
++                for (size_t i = 0; i < Host->peerCount && pn < (int)sizeof pb - 48; i++)
++                {
++                    ENetPeer* pe = &Host->peers[i];
++                    if (pe->state != ENET_PEER_STATE_CONNECTED) continue;
++                    pn += snprintf(pb + pn, sizeof pb - pn, " %u.%u.%u.%u rtt=%u+-%u throttle=%u/32;",
++                        pe->address.host & 0xff, (pe->address.host >> 8) & 0xff, (pe->address.host >> 16) & 0xff,
++                        pe->address.host >> 24, pe->roundTripTime, pe->roundTripTimeVariance, pe->packetThrottle);
++                }
++                if (pn) Platform::Log(Platform::LogLevel::Info, "[diag] LAN enet:%s\n", pb);
++            }
+             landiag::WaitUS = landiag::WaitMaxUS = 0;
+             landiag::NWaits = landiag::NReplyTimeout = 0;
+             landiag::SReply.Reset(); landiag::SRtt.Reset(); landiag::SPre.Reset(); landiag::SRun.Reset(); landiag::SEmu.Reset();
+-- 
+2.56.0
+
