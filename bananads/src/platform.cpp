@@ -203,8 +203,9 @@ void WriteNDSSave(const u8* data, u32 len, u32 off, u32 n, void* userdata) {
     if (userdata) Emu::from(userdata)->write_save(data, len, off, n);
 }
 void WriteGBASave(const u8*, u32, u32, u32, void*) {}       // no GBA slot on the handhelds
-// The firmware is generated at every start; of what the game writes into it only the Wi-Fi access points (with
-// the Nintendo WFC ID) are kept, in wifi.wfc_settings (Emu::write_firmware), as melonDS's own frontend does
+// A game's firmware is generated at every start; of what the game writes into it only the Wi-Fi access points (with
+// the Nintendo WFC ID) are kept, in wifi.wfc_settings (Emu::write_firmware), as melonDS's own frontend does. The DS
+// menu (boot=firmware) writes the user's own firmware: its working copy takes it all (firmware.user_copy, Emu::fw_flush)
 void WriteFirmware(const Firmware& fw, u32, u32, void* userdata) {
     if (userdata) Emu::from(userdata)->write_firmware(fw);
 }

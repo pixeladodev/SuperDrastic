@@ -137,6 +137,7 @@ void Emu::shutdown() {
     shut_ = true;
     if (prof_) prof_->finish();  // (its report: the emulator's thread is done by now)
     flush_save(true);
+    fw_flush(true);
     start_mark("quit: save written");
     if (nds_ && !tap_path_.empty()) {
         if (FILE* f = fopen(tap_path_.c_str(), "wb")) {
@@ -1286,7 +1287,12 @@ template <size_t N> static bool read_exact(const std::string& path, std::array<u
 // firmware. A dump whose wireless calibration was blanked (0x2C-0x1FF erased: no RF settings and a MAC of
 // FF:FF:FF:FF:FF:FF, a broadcast address that no other console can answer) gets the generated firmware's calibration;
 // the MAC is set by the caller, one per handheld. `why` says what is missing.
-static bool load_user_firmware(const Config& cfg, NDSArgs& args, std::string& why) {
+// The firmware is also where the DS menu keeps the user's settings (name, language, birthday, colour, touch calibration,
+// access points). The user's dump is never written: the first boot makes a working copy of it, one per handheld
+// (`copy`, firmware.user_copy, with the calibration and the MAC as below), and later boots load that copy, which takes
+// the menu's writes (Emu::fw_flush). Deleting the copy goes back to the dump. `from_copy` says which was loaded.
+static bool load_user_firmware(const Config& cfg, NDSArgs& args, const std::string& copy, bool& from_copy,
+                               std::string& why) {
     const std::string b9 = bios_file(cfg, "bios9", {"bios9.bin", "biosnds9.rom", "bios9.rom", "nds_bios_arm9.bin"});
     const std::string b7 = bios_file(cfg, "bios7", {"bios7.bin", "biosnds7.rom", "bios7.rom", "nds_bios_arm7.bin"});
     const std::string fp = bios_file(cfg, "firmware", {"firmware.bin", "nds_firmware.bin", "firmware.rom", "fw.bin"});
@@ -1295,7 +1301,12 @@ static bool load_user_firmware(const Config& cfg, NDSArgs& args, std::string& wh
     if (!read_exact(b9, *a9)) { why = b9 + " (4 KB)"; return false; }
     if (!read_exact(b7, *a7)) { why = b7 + " (16 KB)"; return false; }
     std::vector<uint8_t> raw;
-    if (!read_file(fp, raw) || (raw.size() != 0x20000 && raw.size() != 0x40000 && raw.size() != 0x80000)) {
+    from_copy = false;
+    if (!copy.empty() && read_file(copy, raw) && (raw.size() == 0x20000 || raw.size() == 0x40000 || raw.size() == 0x80000)) {
+        if (Firmware(raw.data(), (u32)raw.size()).IsBootable()) from_copy = true;
+        else Log(LogLevel::Warn, "[fw] %s isn't a bootable firmware: %s is used\n", copy.c_str(), fp.c_str());
+    }
+    if (!from_copy && (!read_file(fp, raw) || (raw.size() != 0x20000 && raw.size() != 0x40000 && raw.size() != 0x80000))) {
         why = fp + " (128, 256 or 512 KB)";
         return false;
     }
@@ -1314,7 +1325,8 @@ static bool load_user_firmware(const Config& cfg, NDSArgs& args, std::string& wh
         Log(LogLevel::Warn, "[fw] %s has no wireless calibration (blanked in the dump): the generated one is used\n",
             fp.c_str());
     }
-    Log(LogLevel::Info, "[fw] booting the DS firmware: %s, %s, %s\n", b9.c_str(), b7.c_str(), fp.c_str());
+    Log(LogLevel::Info, "[fw] booting the DS firmware: %s, %s, %s\n", b9.c_str(), b7.c_str(),
+        from_copy ? (copy + " (the DS settings kept on this handheld)").c_str() : fp.c_str());
     args.ARM9BIOS = std::move(a9);
     args.ARM7BIOS = std::move(a7);
     args.Firmware = std::move(fw);
@@ -1727,6 +1739,9 @@ bool rom_unmap(uint8_t* p) {
 
 bool Emu::load_rom(const std::string& path) {
     if (nds_) flush_save(true);  // the cart that is about to go: its save first
+    if (nds_) fw_flush(true);    // (the DS menu going: Banana Party's room loads its stub in this same process)
+    fw_copy_path_.clear();
+    fw_dirty_us_ = 0;
     // (@firmware: the room asking for the DS menu with "play @firmware"; boot=firmware: a launcher asking for it)
     firmware_boot_ = path == "@firmware" || cfg_.str("boot", "game") == "firmware";
     std::unique_ptr<NDSCart::CartCommon> cart;
@@ -1822,9 +1837,12 @@ bool Emu::load_rom(const std::string& path) {
 
     NDSArgs args;  // FreeBIOS and a generated firmware: no BIOS or firmware files needed, as with DraStic
     if (dsi_) args.Firmware = Firmware(1);  // (a DSi's generated firmware)
+    bool fw_from_copy = false;
     if (firmware_boot_) {
         std::string why;
-        if (!load_user_firmware(cfg_, args, why)) {
+        const std::string uc = cfg_.str("firmware.user_copy", "firmware/firmware.bin");
+        fw_copy_path_ = uc == "off" ? "" : Platform::GetLocalFilePath(uc);
+        if (!load_user_firmware(cfg_, args, fw_copy_path_, fw_from_copy, why)) {
             Log(LogLevel::Error, "[fw] boot=firmware needs the DS's BIOS and firmware: missing or wrong: %s\n", why.c_str());
             return false;
         }
@@ -1898,6 +1916,16 @@ bool Emu::load_rom(const std::string& path) {
     }
     }
     args.Firmware.UpdateChecksums();
+    if (firmware_boot_ && !fw_copy_path_.empty() && !fw_from_copy) {  // the first boot: the working copy made
+        mkdirs(fw_copy_path_.substr(0, fw_copy_path_.find_last_of('/')));
+        if (write_file_durable(fw_copy_path_, args.Firmware.Buffer(), args.Firmware.Length()))
+            Log(LogLevel::Info, "[fw] the DS settings are kept in %s from now on\n", fw_copy_path_.c_str());
+        else {
+            Log(LogLevel::Warn, "[fw] couldn't write %s (%s): the DS settings won't be kept\n", fw_copy_path_.c_str(),
+                strerror(errno));
+            fw_copy_path_.clear();
+        }
+    }
     wfc_last_.clear();
     if (!wfc_path_.empty() && !wfc_settings_get(args.Firmware, wfc_last_)) {
         Log(LogLevel::Warn, "[wifi] the generated firmware's access points aren't where they should be: the WFC "
@@ -2467,6 +2495,10 @@ void Emu::update_mp_active() {
 }
 
 void Emu::write_firmware(const melonDS::Firmware& fw) {
+    if (firmware_boot_) {  // the DS menu saving its settings: in the working copy once its writes settle (fw_flush)
+        if (!fw_copy_path_.empty() && !hidden_) fw_dirty_us_ = now_us();
+        return;
+    }
     if (wfc_path_.empty() || hidden_) return;  // (a frame run ahead: written again when it runs for real)
     if (fw.GetHeader().Identifier != GENERATED_FIRMWARE_IDENTIFIER) return;  // (a real firmware isn't ours to keep)
     std::vector<uint8_t> now;
@@ -2476,6 +2508,17 @@ void Emu::write_firmware(const melonDS::Firmware& fw) {
         Log(LogLevel::Info, "[wifi] WFC settings saved to %s\n", wfc_path_.c_str());
     } else
         Log(LogLevel::Warn, "[wifi] couldn't save the WFC settings to %s (%s)\n", wfc_path_.c_str(), strerror(errno));
+}
+
+void Emu::fw_flush(bool now) {
+    if (!fw_dirty_us_ || !nds_ || fw_copy_path_.empty()) return;
+    if (!now && now_us() - fw_dirty_us_ < 500000) return;  // (a settings save is a few page writes in a row)
+    const Firmware& fw = nds_->GetFirmware();
+    if (write_file_durable(fw_copy_path_, fw.Buffer(), fw.Length()))
+        Log(LogLevel::Info, "[fw] DS settings saved to %s\n", fw_copy_path_.c_str());
+    else
+        Log(LogLevel::Warn, "[fw] couldn't save the DS settings to %s (%s)\n", fw_copy_path_.c_str(), strerror(errno));
+    fw_dirty_us_ = 0;
 }
 
 void Emu::diag_sleep(long long us) {
@@ -2568,6 +2611,7 @@ void Emu::run_frame() {
     }
     note_capture();
     flush_save(false);
+    fw_flush(false);
     if (local_) {
         update_mp_active();
         lan_refresh(false);

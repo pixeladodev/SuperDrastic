@@ -191,6 +191,9 @@ public:
     void write_save(const uint8_t* data, uint32_t len, uint32_t off, uint32_t n);
     // the game wrote the firmware (Platform::WriteFirmware): the WFC settings out to wifi.wfc_settings if changed
     void write_firmware(const melonDS::Firmware& fw);
+    // boot=firmware: the DS menu's own writes (name, language, the other settings) out to the handheld's working copy
+    // of the firmware (firmware.user_copy), now (a game coming in, the quit) or once the writes settle
+    void fw_flush(bool now);
     melonDS::Net* net() { return net_.get(); }
     void stop_requested() { stop_ = true; }
     bool stopped() const { return stop_; }
@@ -215,6 +218,8 @@ private:
     bool dsi_nand_ = false;  // the NAND's working copy is in
     uint32_t dsi_title_cat_ = 0, dsi_title_id_ = 0;
     bool firmware_boot_ = false;  // boot=firmware: the user's BIOS and firmware, the DS menu, no cart
+    std::string fw_copy_path_;    // boot=firmware: the handheld's working copy of the firmware ("" none)
+    uint64_t fw_dirty_us_ = 0;    // when the DS menu last wrote the firmware, not yet in the copy (0: nothing to write)
     bool dsi_ = false;       // a DSi, not a DS
     bool dsi_bios_ = false;  // the DSi's own BIOS images, not the free ones
     bool dsi_user_nand_ = false;  // the NAND is a copy of the user's dsi_nand.bin (keeps its own region)
