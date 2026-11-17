@@ -239,6 +239,8 @@ private:
     void lan_auto_listen(const std::string& msg);     // listen 2 s + 0-1 s at random, then join or host
     bool lan_auto_join(uint32_t ip, bool tagged);
     void lan_auto_host();
+    void lan_promote(LanMode mode, const std::string& addr);  // Auto became Host or Guest: that mode sticks
+    void lan_conf_set(const char* value);             // wifi.local in bananads.conf (Auto is not written)
     void lan_tag_update();                            // the beacon's game tag and Status (a host of any mode)
     void lan_net_check(bool now);                     // a usable network, every 1 s (same); its changes
     bool lan_net_wait(LanMode mode, const std::string& addr, int max_players);  // no network: the mode waits
@@ -283,6 +285,7 @@ private:
     char gamecode_[4] = {'#', '#', '#', '#'};  // the cart header's game code (the LAN beacon's tag)
     // Auto (emulator thread)
     bool auto_on_ = false;
+    bool game_wifi_ = false;  // the game's antenna last frame (host/join: Begin when it turns on)
     bool auto_now_ = false;                   // wifi.local_auto_start = now: no wait for the game's wifi (tests)
     std::vector<std::pair<long, bool>> auto_test_wifi_;  // wifi.local_auto_test_wifi: the game's wifi by frame (tests)
     std::vector<std::pair<long, LanMode>> lan_test_modes_;  // wifi.local_test_mode: the Mode row by frame (tests)

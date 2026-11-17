@@ -238,6 +238,7 @@ add_executable(bananads
     src/platform.cpp
     src/mic.cpp
     src/wifi.cpp
+    src/lobbyctl.cpp
     src/video_headless.cpp)
 target_include_directories(bananads PRIVATE src)
 target_link_libraries(bananads PRIVATE core bananads-net pthread ${CMAKE_DL_LIBS})

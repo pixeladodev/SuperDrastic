@@ -1844,6 +1844,13 @@ static int mh_live(void* c) {
         m->calm_since = 0;
         return 1;
     }
+    {
+        const Emu::LanStatus room = m->emu->lan_status();
+        if (room.built && (room.mode == Emu::LanMode::Host || room.mode == Emu::LanMode::Join)) {
+            m->calm_since = 0;
+            return 1;
+        }
+    }
     if (!m->calm_since) m->calm_since = t;
     if (t - m->calm_since < 3000000) return 1;
     if (!m->pause_game || !m->pause_game()) return 1;  // (the emulator's thread didn't stop: still live, all still off)
@@ -2024,8 +2031,9 @@ static void mh_cheat_set(void* c, int i, int on) {
 }
 static void mh_log(void*, const char* line) { Log(LogLevel::Info, "%s", line); }
 // Local multiplayer (menu.h): the emulator's LAN state for the menu's page, and the menu's picks for the emulator. The
-// mode and Host's size (Auto's too) are kept in bananads.conf (wifi.local, wifi.local_players) for the next game; a join
-// keeps "join" (look for hosts at the start), not the host's address, which can change. BANANADS_WIFI_LOCAL and
+// mode and Host's size are kept in bananads.conf (wifi.local, wifi.local_players). A guest keeps
+// join:<the host's address>. Auto is not written: it lasts for this game, and becomes Host or that
+// guest if it finds a room. BANANADS_WIFI_LOCAL and
 // BANANADS_WIFI_LOCAL_PLAYERS (bananads.env) win over bananads.conf at each start: the page says so
 static Emu* g_lan_emu;
 static void lan_copy(char* d, size_t n, const std::string& s) { snprintf(d, n, "%s", s.c_str()); }
@@ -2088,9 +2096,9 @@ static void mh_lan_set(void*, int mode, int max_players, const char* addr) {
     const Emu::LanMode m = mode == BM_LAN_HOST ? Emu::LanMode::Host : mode == BM_LAN_JOIN ? Emu::LanMode::Join
                          : mode == BM_LAN_AUTO ? Emu::LanMode::Auto : Emu::LanMode::Off;
     g_lan_emu->lan_request(m, addr ? addr : "", max_players);
-    save_opt("wifi.local", m == Emu::LanMode::Host ? "host" : m == Emu::LanMode::Join ? "join"
-                         : m == Emu::LanMode::Auto ? "auto" : "off");
-    if (m == Emu::LanMode::Host && max_players >= 2)  // (Auto hosts with Host's size: nothing of its own)
+    // Auto is not a saved mode. Host, guest (with the address) and off are written when the
+    // emulator's thread applies them. Host's size is written here.
+    if (m == Emu::LanMode::Host && max_players >= 2)
         save_opt("wifi.local_players", std::to_string(max_players));
 }
 // Connection: Router / Direct, kept in bananads.conf (wifi.local_link); a saved Direct never starts a mode by itself
@@ -2103,6 +2111,9 @@ static void mh_lan_link_set(void*, int direct) {
 // ---- the frontend ---------------------------------------------------------------------------------------------
 
 int run_kms(Emu& emu, const Config& cfg) {
+    g_quit = false;  // a game that already quit can run again in this same process
+    g_save = false;
+    g_nosave = false;
     const char* et = getenv("BANANADS_TOP");
     const char* eh = getenv("BANANADS_TOUCH");
     const std::string top = cfg.str("kms.top", et && *et ? et : "DSI-2");
@@ -2282,6 +2293,9 @@ int run_kms(Emu& emu, const Config& cfg) {
         h.ctx = &mh;
         h.rom = mh.rom.c_str();
         h.resume_on = cfg.flag("resume.on_quit", true);
+        // Banana Lobby runs this process. Slot 0 (the resume spot, not a menu slot) is not
+        // written. Save and quit stays on the question, dimmed, and A does not choose it.
+        h.no_spot = cfg.str("wifi.lobbyctl_dir", "").empty() ? 0 : 1;
         h.canvas = mh_canvas;
         h.show = mh_show;
         h.grab_top = mh_grab_top;
@@ -2293,7 +2307,7 @@ int run_kms(Emu& emu, const Config& cfg) {
         h.quit = mh_quit;
         h.quit_nosave = mh_quit_nosave;
         h.hotkey = mh_hotkey;
-        g_quit_saves = h.resume_on;
+        g_quit_saves = h.resume_on && !h.no_spot;
         h.restart = mh_restart;
         h.mp_lock = mh_mp_lock;
         h.live = mh_live;
@@ -2755,8 +2769,12 @@ int run_kms(Emu& emu, const Config& cfg) {
         // kms.menu_live: a local wireless game keeps running behind the menu, with no buttons and no touch from the
         // player (the menu reads the input meanwhile; the lid stays as it is); the panels show the menu, its top
         // screen over the frame from the moment it opened, while the game's new frames go on into the queue unseen
-        // (Display::publish drops the oldest; the slot on screen is never written). Its sound goes on, lowered
-        const bool live = menu_live && emu.mp_active();
+        // (Display::publish drops the oldest; the slot on screen is never written). Its sound goes on, lowered.
+        // A lobby already open (host or join) keeps running behind the menu, even if kms.menu_live is off.
+        // Pausing that session drops it. Auto is unchanged: it still pauses unless a game is on.
+        const Emu::LanStatus room = emu.lan_status();
+        const bool lobby = room.built && (room.mode == Emu::LanMode::Host || room.mode == Emu::LanMode::Join);
+        const bool live = lobby || (menu_live && emu.mp_active());
         if (live) {
             keys = 0;
             hot = false;
@@ -3015,7 +3033,11 @@ int run_kms(Emu& emu, const Config& cfg) {
                     const int p = pad_index(x.code);
                     if (p < 0) continue;
                     if (hot && x.value) {  // F + a button: BananaDS's own, not the game's (by the button, whatever its job)
-                        if (p == P_START) g_quit = true;
+                        if (p == P_START) {
+                            g_quit = true;
+                            // A lobby quits without the resume spot. BananaDS on its own still saves it.
+                            if (!cfg.str("wifi.lobbyctl_dir", "").empty()) g_nosave = true;
+                        }
                         else if (p == P_SELECT) swap_toggle(dp, mh.rom);
                         else if (p == P_R) in_save = 1;
                         else if (p == P_L) in_load = 1;
@@ -3108,15 +3130,22 @@ int run_kms(Emu& emu, const Config& cfg) {
         dp.shown.load(), dp.dropped.load());
 
     // the resume state at the top clock (a save at 2x takes a visible moment at a low one), then the rest
-    if (g_save || (cfg.flag("resume.on_quit", true) && !g_nosave)) {
+    // Banana Lobby never writes slot 0, except SIGUSR1 (g_save: the console is powering off).
+    // F + START and Quit without saving set g_nosave. Save and quit is not offered as A.
+    const bool lobby_spot = !cfg.str("wifi.lobbyctl_dir", "").empty();
+    if (g_save || (cfg.flag("resume.on_quit", true) && !g_nosave && !lobby_spot)) {
         cpugov_boost(5000);
         emu.save_state(0);
-    } else if (g_nosave)
+    } else if (g_nosave || lobby_spot)
         Log(LogLevel::Info, "[kms] quit without saving: the resume state left as it was\n");
     cpugov_stop();
 #ifdef BANANADS_ALSA
     start_mark("quit: cpugov");
-    alsa_stop(snd);
+    // A game opened from Banana Lobby returns to the library in this same process. Closing
+    // here, without the quit's child, frees the device so the library's navigation can play.
+    // BananaDS on its own is exiting: the child still closes it after the process is gone.
+    if (!cfg.str("wifi.lobbyctl_dir", "").empty()) alsa_release(snd);
+    else alsa_stop(snd);
 #endif
     start_mark("quit: alsa");
     if (!screenshot_wait(3000)) Log(LogLevel::Warn, "[shot] still being written at quit\n");

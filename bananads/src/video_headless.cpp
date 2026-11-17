@@ -3,10 +3,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "Platform.h"
 #include "frontend.h"
+#include "lobbyctl.h"
 
 using melonDS::Platform::Log;
 using melonDS::Platform::LogLevel;
@@ -109,8 +111,16 @@ int run_headless(Emu& emu, const Config& cfg) {
     FILE* hf = rhash.empty() ? nullptr : fopen(rhash.c_str(), "w");
     long ra_done = 0;
     double ra_save = 0, ra_load = 0;
-    for (; done < frames && !emu.stopped(); done++) {
-        if (done == from) tm = tw = tf = std::chrono::steady_clock::now();
+    // A lobby room (wifi.lobbyctl_dir) has to keep calling LAN::Process(), the same way the in-game menu does,
+    // or the UDP 7063 beacons are neither sent nor read. headless.frames=0 means "until stopped". Pace it to a
+    // DS frame so the UI on the other cores can read the room list. A timed benchmark does not set that directory.
+    const bool lobby_room = !cfg.str("wifi.lobbyctl_dir", "").empty();
+    const auto lobby_slice = std::chrono::milliseconds(16);
+    if (lobby_room)
+        Log(LogLevel::Info, "[headless] lobby room: announcing and listening on UDP 7063 until stopped\n");
+    for (; (frames <= 0 || done < frames) && !emu.stopped(); done++) {
+        const auto slice_start = std::chrono::steady_clock::now();
+        if (done == from) tm = tw = tf = slice_start;
         if (!input.empty()) {
             uint32_t keys = 0;
             for (const Press& p : input)
@@ -118,6 +128,11 @@ int run_headless(Emu& emu, const Config& cfg) {
             emu.set_keys(keys);
         }
         if (!ring.empty()) emu.draw_into(ring[done % 4 * 2].data(), ring[done % 4 * 2 + 1].data());
+        emu.service_net();
+        if (lobby_room) {
+            if (lobbyctl_stop_requested()) return 4;  // Banana Lobby closed: the process ends
+            if (lobbyctl_has_play()) return 3;        // show that game, then come back here
+        }
         emu.run_frame();
         if (ahead) {
             const size_t px = (size_t)256 * 192 * emu.scale() * emu.scale();
@@ -153,6 +168,10 @@ int run_headless(Emu& emu, const Config& cfg) {
         if (!dir.empty() && every > 0 && (done + 1) % every == 0)
             dump_ppm(dir + "/frame" + std::to_string(done + 1) + ".ppm", pic[0].empty() ? emu.top() : pic[0].data(),
                      pic[0].empty() ? emu.bottom() : pic[1].data(), emu.scale());
+        if (lobby_room) {
+            const auto spent = std::chrono::steady_clock::now() - slice_start;
+            if (spent < lobby_slice) std::this_thread::sleep_for(lobby_slice - spent);
+        }
     }
     if (af) fclose(af);
     if (hf) fclose(hf);

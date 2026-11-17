@@ -61,6 +61,9 @@ typedef struct {
     void* ctx;
     const char* rom;  // the game's file
     int resume_on;    // quitting writes the resume state ("keeps your spot")
+    // Banana Lobby: the resume spot (slot 0) is not written. Save and quit stays on the quit
+    // question, drawn off, and A does not choose it. Quit without saving and Keep playing stay.
+    int no_spot;
     // a buffer to draw the panel's next picture in (panel 0 top, 1 bottom): its index, or -1
     int (*canvas)(void* ctx, int panel, uint32_t** px, int* pitch, int* w, int* h);
     void (*show)(void* ctx, int panel, int k);  // buffer k onto the panel

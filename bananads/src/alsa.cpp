@@ -417,6 +417,14 @@ Alsa* alsa_start(Emu& emu, const Config& cfg) {
     return a;
 }
 
+void alsa_release(Alsa* a) {
+    if (!a) return;
+    // Banana Lobby stays up after a game. The quit's child would hold the device until this
+    // process dies, and the library's navigation could not open it. Close it here instead.
+    a->close_child = false;
+    alsa_stop(a);
+}
+
 void alsa_mute(Alsa* a, bool on) {
     if (!a || a->mute.exchange(on) == on) return;
     Log(LogLevel::Info, "[alsa] game sound %s\n", on ? "faded out (fast-forward)" : "back");

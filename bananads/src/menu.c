@@ -2,8 +2,9 @@
 // colours, driven by BananaDS's KMS frontend through menu.h's bmenu_host instead of DraStic's SDL calls. L3 (or F on
 // its own) opens it; the game, its sound and its clock stand still while it is up.
 //
-// Bottom panel: six tiles (Resume, Save, Load, Quick settings, Restart game, Quit game) over a Brightness row (both
-// panels' backlights, as Quick settings has it: down from the tiles, left / right or L / R to change), then a page for
+// Bottom panel: six tiles (Resume, Save, Load, Quick settings, Restart game, Quit game) over a Local multiplayer row
+// (the page that used to live under Quick settings: down from the tiles, A opens it). Brightness stays in Quick
+// settings. Then a page for
 // each; X (or its pill in the footer) lists the hotkeys, as the frontend reads them (bmenu_host's hotkey).
 // Top panel: the game's last frame, dimmed, under a card with the game, this session's play time and the last save;
 // while a save slot is picked, that slot's picture instead. D-pad and touch work; A picks, B goes back, L3 or START
@@ -531,7 +532,7 @@ static void play(int id) { if (snd_ok[id] && H.sound_play) H.sound_play(H.ctx, i
 enum { SC_MAIN, SC_SAVE, SC_LOAD, SC_SET, SC_QUIT, SC_OVERWRITE, SC_BUSY, SC_MIC, SC_RESTART, SC_CHEAT, SC_QUIT_NOSAVE, SC_KEYS,
        SC_LAN, SC_LAN_HOSTS, SC_LAN_LEAVE, SC_LAN_SWITCH };
 static int enabled = -1, inited, open_, scr, sel_main, sel_slot, sel_set, dirty_top, dirty_bot;
-#define MAIN_BRI 6                                /* sel_main: the main page's Brightness row, under the tiles */
+#define MAIN_LAN 6                                /* sel_main: Local multiplayer, the wide row under the tiles */
 static int main_col;                              /* the tiles' column the d-pad came down from (back up to it) */
 static char busy_msg[96];
 
@@ -554,7 +555,7 @@ static int sel_cheat, top_cheat;
 static void make_rows(void) {
     nrows = 0; rows[nrows++] = ROW_VOL; rows[nrows++] = ROW_BRI; rows[nrows++] = ROW_MIC;
     if (H.cheat_count) rows[nrows++] = ROW_CHEAT;
-    { static bmenu_lan probe; if (H.lan_get && H.lan_get(H.ctx, &probe)) rows[nrows++] = ROW_LAN; }
+    /* Local multiplayer is the wide row on the main page, not a Quick settings row. */
     int n = H.opt_count ? H.opt_count(H.ctx) : 0;
     for (int i = 0; i < n && nrows < MAX_ROWS; i++) rows[nrows++] = ROW_OPT + i;
 }
@@ -962,8 +963,9 @@ static int bar_value(rect b, int px, canvas *c) {   /* a tap on a row's bar: its
     int v = (px - b.x0 - S(8)) * 100 / S(146); v = (v + 2) / 5 * 5;
     return v < 0 ? 0 : v > 100 ? 100 : v;
 }
-/* a question over the page: B no, A yes; with alt, a second row under them: X alt, in red (Quit without saving) */
-static void dialog3(canvas *c, const char *title, const char *body, const char *no, const char *yes, int danger, const char *alt) {
+/* a question over the page: B no, A yes; with alt, a second row under them: X alt, in red (Quit without saving).
+   yes_off: A is drawn, dim, and does not hit (Banana Lobby: Save and quit is not the choice). */
+static void dialog3(canvas *c, const char *title, const char *body, const char *no, const char *yes, int danger, const char *alt, int yes_off) {
     fill(c, 0, 0, c->w, c->h, C_DARK, 0.65f);
     int w = S(460), h = alt ? S(260) : S(210), x0 = (c->w - w) / 2, y0 = alt ? S(100) : S(120);
     box(c, x0, y0, x0 + w, y0 + h, S(14), S(3), C_LIGHT, C_DARK);
@@ -972,12 +974,16 @@ static void dialog3(canvas *c, const char *title, const char *body, const char *
     text(c, &F_REG, l1, x0 + S(26), y0 + S(66), S(17), C_BODY, w - S(52), 0);
     if (n > 1) text(c, &F_REG, l2, x0 + S(26), y0 + S(90), S(17), C_BODY, w - S(52), 0);
     int by = y0 + h - (alt ? S(110) : S(60));
-    R_DLG_A = pill(c, x0 + w - S(24), by, 1, "A", yes, danger ? C_REDL : C_LIGHT, danger ? C_LIGHT : C_ONSEL, danger ? C_RED : C_BLUE);
-    R_DLG_B = pill(c, R_DLG_A.x0 - S(12), by, 1, "B", no, C_GREY, C_LIGHT, C_PILLBG);
+    rect a = pill(c, x0 + w - S(24), by, 1, "A", yes,
+                  yes_off ? C_DIM : danger ? C_REDL : C_LIGHT,
+                  yes_off ? C_DIM : danger ? C_LIGHT : C_ONSEL,
+                  yes_off ? C_DARK : danger ? C_RED : C_BLUE);
+    R_DLG_B = pill(c, a.x0 - S(12), by, 1, "B", no, C_GREY, C_LIGHT, C_PILLBG);
+    R_DLG_A = yes_off ? (rect){ 0, 0, 0, 0 } : a;
     R_DLG_X = alt ? pill(c, x0 + w - S(24), by + S(50), 1, "X", alt, C_REDDIM, C_REDL, C_DARK) : (rect){ 0, 0, 0, 0 };
 }
 static void dialog(canvas *c, const char *title, const char *body, const char *no, const char *yes, int danger) {
-    dialog3(c, title, body, no, yes, danger, 0);
+    dialog3(c, title, body, no, yes, danger, 0, 0);
 }
 static void draw_bottom(void) {
     canvas *c = &CV[1];
@@ -1022,7 +1028,20 @@ static void draw_bottom(void) {
             text(c, &F_REG, h, x + tw / 2.0f, cy + S(92), S(14), sub2, tw - S(16), 1);
         }
         R_MBRI = (rect){ gx0, gy1 - rh, gx1, gy1 };
-        level_row(c, gx0, gy1 - rh, gx1, rh, sel_main == MAIN_BRI, IC_SUN, "Brightness", bri, &R_MBRI_BAR);
+        R_MBRI_BAR = (rect){ 0, 0, 0, 0 };
+        {
+            int sel = sel_main == MAIN_LAN, closed = !H.lan_get || lan_closed();
+            char st[64];
+            if (H.lan_get) { lan_poll(); closed = lan_closed(); lan_short(st, sizeof st); }
+            else snprintf(st, sizeof st, "No Wi-Fi");
+            box(c, gx0, gy1 - rh, gx1, gy1, S(10), bw, sel ? C_LIGHT : C_LINE, sel ? C_BLUE : C_PANEL);
+            int k = S(2) < 2 ? 2 : S(2);
+            bitmap(c, IC_LAN, 12, gx0 + S(16), gy1 - rh + (rh - 12 * k) / 2, k, sel ? C_ONSEL : closed ? C_DIM : C_LIGHT);
+            text(c, &F_MED, "Local multiplayer", gx0 + S(56), gy1 - rh + (rh - S(20)) / 2.0f - S(1), S(20),
+                 sel ? C_ONSEL : closed ? C_DIM : C_LIGHT, 0, 0);
+            text(c, &F_MED, st, gx1 - S(18), gy1 - rh + (rh - S(20)) / 2.0f - S(1), S(20),
+                 sel ? C_ONSEL : closed ? C_DIM : C_CYAN, 0, 2);
+        }
     } else if (s == SC_SAVE || s == SC_LOAD) {
         char sub[48]; snprintf(sub, sizeof sub, "Slot %d of %d", sel_slot + 1, NSLOT);
         draw_header(c, s == SC_SAVE ? "Save" : "Load", sub, 1);
@@ -1395,9 +1414,9 @@ static void draw_bottom(void) {
     }
     /* footer */
     int fy = c->h - S(56);
-    const char *bl = s == SC_MAIN ? "Resume" : "Back", *al = "Select", *mid = "";
+    const char *bl = s == SC_MAIN ? "Resume" : "Back", *al = s == SC_MAIN && sel_main == MAIN_LAN ? "Open" : "Select", *mid = "";
     if (s == SC_SAVE) al = "Save"; else if (s == SC_LOAD) al = "Load";
-    else if (s == SC_SET) al = rows[sel_set] == ROW_MIC || (rows[sel_set] == ROW_LAN && !lan_closed()) || (rows[sel_set] == ROW_CHEAT && !cheats_off()) ? "Open" : "OK";
+    else if (s == SC_SET) al = rows[sel_set] == ROW_MIC || (rows[sel_set] == ROW_CHEAT && !cheats_off()) ? "Open" : "OK";
     else if (s == SC_LAN) {
         const int id = nlrows ? lrows[sel_lan] : LR_MODE;
         if (id == LR_MODE && lan_auto_off_only()) al = lan_pick == BM_LAN_OFF ? "Turn off" : "OK";
@@ -1435,8 +1454,10 @@ static void draw_bottom(void) {
         char b[160]; snprintf(b, sizeof b, "The save from %s will be replaced by this one.", w);
         dialog(c, t, b, "Cancel", "Replace", 0);
     } else if (scr == SC_QUIT && H.resume_on && H.quit_nosave)   /* saving the spot first; quitting without it, under it */
-        dialog3(c, "Quit to the menu?", "Your spot is saved. Next time the game picks up right here.", "Keep playing",
-                "Save and quit", 0, "Quit without saving");
+        dialog3(c, "Quit to the menu?",
+                H.no_spot ? "A lobby does not keep the resume spot."
+                          : "Your spot is saved. Next time the game picks up right here.",
+                "Keep playing", "Save and quit", 0, "Quit without saving", H.no_spot);
     else if (scr == SC_QUIT)
         dialog(c, "Quit to the menu?", H.resume_on ? "Your spot is saved. Next time the game picks up right here."
                                                    : "Anything since your last save will be lost.", "Keep playing", "Quit", 1);
@@ -1606,7 +1627,10 @@ static void activate(void) {
                 play(SND_SELECT); dirty_top = dirty_bot = 1; break;
         case 4: scr = SC_RESTART; play(SND_SELECT); dirty_bot = 1; break;
         case 5: scr = SC_QUIT; play(SND_SELECT); dirty_bot = 1; break;
-        case MAIN_BRI: play(SND_SELECT); break;   /* (left / right change it) */
+        case MAIN_LAN:
+            lan_poll();
+            if (!H.lan_get || lan_closed()) { play(SND_BACK); mlog("[menu] LAN multiplayer: no Wi-Fi\n"); break; }
+            lan_open(); scr = SC_LAN; play(SND_SELECT); dirty_bot = 1; break;
         }
         break;
     case SC_SAVE: if (SL[sel_slot].used) { scr = SC_OVERWRITE; play(SND_SELECT); dirty_bot = 1; } else do_save(sel_slot); break;
@@ -1616,8 +1640,6 @@ static void activate(void) {
         if (rows[sel_set] == ROW_MIC) { scr = SC_MIC; play(SND_SELECT); dirty_bot = 1; }
         else if (rows[sel_set] == ROW_CHEAT && cheats_off()) { play(SND_BACK); mlog("[menu] Cheats are off in a local wireless game\n"); }
         else if (rows[sel_set] == ROW_CHEAT) { scr = SC_CHEAT; sel_cheat = top_cheat = 0; play(SND_SELECT); dirty_bot = 1; }
-        else if (rows[sel_set] == ROW_LAN && (lan_poll(), lan_closed())) { play(SND_BACK); mlog("[menu] LAN multiplayer: no Wi-Fi\n"); }
-        else if (rows[sel_set] == ROW_LAN) { lan_open(); scr = SC_LAN; play(SND_SELECT); dirty_bot = 1; }
         else play(SND_SELECT);
         break;
     case SC_CHEAT:
@@ -1633,6 +1655,7 @@ static void activate(void) {
         play(SND_SELECT); if (H.blow) H.blow(H.ctx, 3000); close_menu();
         break;
     case SC_QUIT:
+        if (H.no_spot) { play(SND_BACK); break; }   /* Save and quit is shown, and A does not choose it */
         play(SND_SELECT);
         if (H.resume_on) busy("Saving your spot");
         close_menu(); H.quit(H.ctx);
@@ -1658,7 +1681,8 @@ static void back(void) {
     case SC_OVERWRITE: scr = SC_SAVE; dirty_bot = 1; break;
     case SC_QUIT: case SC_RESTART: scr = SC_MAIN; dirty_bot = 1; break;
     case SC_QUIT_NOSAVE: scr = SC_QUIT; dirty_bot = 1; break;
-    case SC_MIC: case SC_CHEAT: case SC_LAN: scr = SC_SET; dirty_bot = 1; break;
+    case SC_MIC: case SC_CHEAT: scr = SC_SET; dirty_bot = 1; break;
+    case SC_LAN: scr = SC_MAIN; dirty_bot = 1; break;
     case SC_LAN_HOSTS: case SC_LAN_LEAVE: scr = SC_LAN; dirty_bot = 1; break;
     case SC_LAN_SWITCH: lan_pick = LS.mode; scr = SC_LAN; dirty_bot = 1; break;   /* No: the mode stays */
     default: scr = SC_MAIN; dirty_top = dirty_bot = 1; break;
@@ -1673,18 +1697,16 @@ static void adjust(int d) {                     /* left/right on a Quick setting
         if (n > 1) { int v = (H.opt_get(H.ctx, i) + d + n) % n; H.opt_set(H.ctx, i, v); play(SND_MOVE); dirty_bot = 1; }
     }
 }
-static void adjust_main_bri(int d) { if (bri_set(bri + d * 5)) { play(SND_MOVE); dirty_bot = 1; } }
 static void nav(int dx, int dy) {
     int moved = 0;
     if (scr == SC_MAIN) {
-        if (sel_main == MAIN_BRI) {               /* the Brightness row: left / right change it, up is the tiles */
-            if (dx) { adjust_main_bri(dx); return; }
+        if (sel_main == MAIN_LAN) {               /* the wide row: up returns to the tiles */
             if (dy < 0) { sel_main = 3 + main_col; moved = 1; }
         } else {
             int c = sel_main % 3, r = sel_main / 3;
             if (dx) { int n = c + dx; if (n >= 0 && n < 3) { c = n; moved = 1; } }
-            if (dy) { int n = r + dy; if (n >= 0 && n < 2) { r = n; moved = 1; } else if (n == 2) { main_col = c; sel_main = MAIN_BRI; moved = 1; } }
-            if (sel_main != MAIN_BRI) sel_main = r * 3 + c;
+            if (dy) { int n = r + dy; if (n >= 0 && n < 2) { r = n; moved = 1; } else if (n == 2) { main_col = c; sel_main = MAIN_LAN; moved = 1; } }
+            if (sel_main != MAIN_LAN) sel_main = r * 3 + c;
         }
     } else if (scr == SC_SAVE || scr == SC_LOAD) {
         int c = sel_slot % 4, r = sel_slot / 4;
@@ -1725,9 +1747,8 @@ static void tap(int px, int py) {               /* a touch-down on the bottom pa
         for (int i = 0; i < 6; i++) if (in_rect(R_TILE[i], px, py)) { sel_main = i; dirty_bot = 1; activate(); return; }
         if (in_rect(R_KEYS, px, py)) { keys_open(); return; }
         if (in_rect(R_MBRI, px, py)) {
-            if (sel_main != MAIN_BRI) { if (sel_main >= 3) main_col = sel_main - 3; sel_main = MAIN_BRI; }
-            if (in_rect(R_MBRI_BAR, px, py)) bri_set(bar_value(R_MBRI_BAR, px, &CV[1]));
-            play(SND_MOVE); dirty_bot = 1; return;
+            if (sel_main >= 3 && sel_main < 6) main_col = sel_main - 3;
+            sel_main = MAIN_LAN; dirty_bot = 1; activate(); return;
         }
     }
     else if (scr == SC_SAVE || scr == SC_LOAD) {
@@ -1783,7 +1804,6 @@ static void handle(const bmenu_ev *e) {
     else if (b == BM_UP) dir_press(0, -1); else if (b == BM_DOWN) dir_press(0, 1);
     else if (b == BM_LEFT) dir_press(-1, 0); else if (b == BM_RIGHT) dir_press(1, 0);
     else if (b == BM_L && scr == SC_SET) adjust(-1); else if (b == BM_R && scr == SC_SET) adjust(1);
-    else if (b == BM_L && scr == SC_MAIN) adjust_main_bri(-1); else if (b == BM_R && scr == SC_MAIN) adjust_main_bri(1);
     else if (b == BM_L && scr == SC_CHEAT) nav(-1, 0); else if (b == BM_R && scr == SC_CHEAT) nav(1, 0);
     else if (b == BM_L && (scr == SC_LAN || scr == SC_LAN_HOSTS)) nav(-1, 0); else if (b == BM_R && (scr == SC_LAN || scr == SC_LAN_HOSTS)) nav(1, 0);
 }
@@ -1817,7 +1837,7 @@ int bmenu_run(int start) {
         while (open_ && H.poll(H.ctx, &e)) handle(&e);
         if (open_ && held_dir && now_ms() >= rep_next) { nav(rep_dx, rep_dy); rep_next = now_ms() + 110; }
         { static long long mt; if (scr == SC_MIC && now_ms() - mt >= 33) { mt = now_ms(); dirty_bot = 1; } }   /* the meter moves */
-        if ((scr == SC_LAN || scr == SC_LAN_HOSTS || scr == SC_LAN_LEAVE || scr == SC_LAN_SWITCH || scr == SC_SET) && now_ms() - lan_polled >= 500) {
+        if ((scr == SC_MAIN || scr == SC_LAN || scr == SC_LAN_HOSTS || scr == SC_LAN_LEAVE || scr == SC_LAN_SWITCH || scr == SC_SET) && now_ms() - lan_polled >= 500) {
             if (lan_poll()) dirty_bot = 1;   /* the LAN's state, twice a second; a join done: back to the page */
             if (scr == SC_LAN_HOSTS && lan_joining && !(LS.state == BM_LAN_BUSY && LS.addr[0])) { lan_joining = 0; scr = SC_LAN; sel_lan = lan_mode_row(); dirty_bot = 1; }
             if (scr == SC_LAN_LEAVE && LS.state != BM_LAN_READY) { scr = SC_LAN; dirty_bot = 1; }

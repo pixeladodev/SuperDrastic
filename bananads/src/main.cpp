@@ -22,6 +22,7 @@
 #include "config.h"
 #include "emu.h"
 #include "frontend.h"
+#include "lobbyctl.h"
 
 namespace bananads {
 extern FILE* g_log;
@@ -60,6 +61,17 @@ static int mm_holder(void*) {
 
 static void usage() {
     fprintf(stderr, "usage: bananads [--config file] [--set key=value]... [--frontend kms|sdl|headless] game.nds\n");
+}
+
+// lobby/discover is 0 when Banana Lobby's Auto discovery is off. Missing means on.
+static bool lobby_discover_on(const std::string& dir) {
+    if (dir.empty()) return true;
+    FILE* f = fopen((dir + "/discover").c_str(), "r");
+    if (!f) return true;
+    char b[16] = {};
+    if (!fgets(b, sizeof b, f)) { fclose(f); return true; }
+    fclose(f);
+    return !(b[0] == '0' || b[0] == 'n' || b[0] == 'N' || b[0] == 'f' || b[0] == 'F');
 }
 
 int main(int argc, char** argv) {
@@ -107,7 +119,8 @@ int main(int argc, char** argv) {
     const int rc = [&]() -> int {
         Emu emu(cfg);
         if (!emu.load_rom(rom)) return 1;
-        if (cfg.flag("resume.on_start", true) && emu.load_state(0))
+        // The lobby stub is not a game: its resume state is not loaded. A game opened later is.
+        if (cfg.str("wifi.lobbyctl_dir", "").empty() && cfg.flag("resume.on_start", true) && emu.load_state(0))
             Log(LogLevel::Info, "[resume] resumed where the last session quit\n");
 
         // the default: a window where there is a display server, the panels where there isn't (a handheld's console)
@@ -120,8 +133,53 @@ int main(int argc, char** argv) {
         if (display || def == "headless") def = "sdl";
 #endif
         std::string fe = cfg.str("frontend", def);
-        int code;
-        if (fe == "headless") {
+        int code = 0;
+        // Banana Lobby's room is this process. It stays up in the background (headless) and, when
+        // asked, shows a game on the panels without exiting. Quitting the game comes back here.
+        if (fe == "headless" && !cfg.str("wifi.lobbyctl_dir", "").empty()) {
+            const std::string stub = rom;
+            for (;;) {
+                code = run_headless(emu, cfg);
+                if (code != 3) break;
+                const std::string play = lobbyctl_take_play();
+                if (play.empty() || !emu.load_rom(play)) {
+                    Log(LogLevel::Error, "[lobby] could not open the game\n");
+                    lobbyctl_set_front("room");
+                    lobbyctl_note_played();
+                    lobbyctl_sync(emu);
+                    if (!emu.load_rom(stub)) break;
+                    continue;
+                }
+                // Auto discovery (lobby/discover, missing means on) starts this game on Auto.
+                // Auto is not written to wifi.local: it is not a saved room mode. Off leaves the
+                // game alone until BananaDS LAN's own menu changes it.
+                if (emu.lan_status().mode == Emu::LanMode::Off && lobby_discover_on(cfg.str("wifi.lobbyctl_dir", "")))
+                    emu.lan_request(Emu::LanMode::Auto, "", 0);
+                emu.service_net();
+                // Banana Lobby: a fresh start. Slot 0 is the resume spot, not one of the eight
+                // menu slots, and a room must not pick the game up there. A BananaDS opened on
+                // its own (no lobby directory) still loads it, as the system emulator does.
+                if (cfg.str("wifi.lobbyctl_dir", "").empty() && cfg.flag("resume.on_start", true) &&
+                    emu.load_state(0))
+                    Log(LogLevel::Info, "[resume] resumed where the last session quit\n");
+                lobbyctl_set_front("game");
+                lobbyctl_sync(emu);
+#ifdef BANANADS_KMS
+                code = run_kms(emu, cfg);
+#else
+                Log(LogLevel::Error, "[lobby] this build has no panels\n");
+                code = 2;
+#endif
+                if (emu.lan_status().mode == Emu::LanMode::Auto) {
+                    emu.lan_request(Emu::LanMode::Off, "", 0);
+                    emu.service_net();
+                }
+                lobbyctl_set_front("room");
+                lobbyctl_note_played();
+                lobbyctl_sync(emu);
+                if (!emu.load_rom(stub)) break;
+            }
+        } else if (fe == "headless") {
             code = run_headless(emu, cfg);
         }
 #ifdef BANANADS_SDL

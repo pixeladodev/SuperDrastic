@@ -178,6 +178,20 @@ int lang_init(const char *part) {
         nE++;
     }
     free(l); fclose(f);
+    /* Banana Lobby's menu row, until the language pack ships it. English stays the key. */
+    {
+        const char *en = "Local multiplayer", *tr = "Multijugador local";
+        int have = 0;
+        for (int i = 0; i < nE && !have; i++) have = !strcmp(E[i].en, en);
+        if (!have) {
+            E = realloc(E, (nE + 1) * sizeof *E);
+            entry *x = &E[nE];
+            x->en = strdup(en); x->tr = strdup(tr);
+            x->npe = pieces(x->en, &x->pe); x->npt = pieces(x->tr, &x->pt);
+            x->fixed = fixed_len(x);
+            nE++;
+        }
+    }
     qsort(pat, npat, sizeof *pat, by_fixed);
     active = nE > 0;
     pthread_mutex_unlock(&mu);
