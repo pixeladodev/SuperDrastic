@@ -214,6 +214,7 @@ private:
     const melonDS::NDSCart::CartCommon* dsi_cart_ = nullptr;  // (the game's, while make_dsi runs)
     bool dsi_nand_ = false;  // the NAND's working copy is in
     uint32_t dsi_title_cat_ = 0, dsi_title_id_ = 0;
+    bool firmware_boot_ = false;  // boot=firmware: the user's BIOS and firmware, the DS menu, no cart
     bool dsi_ = false;       // a DSi, not a DS
     bool dsi_bios_ = false;  // the DSi's own BIOS images, not the free ones
     bool dsi_user_nand_ = false;  // the NAND is a copy of the user's dsi_nand.bin (keeps its own region)

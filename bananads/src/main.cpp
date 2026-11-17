@@ -91,6 +91,8 @@ int main(int argc, char** argv) {
             return 2;
         } else rom = a;
     }
+    if (rom.empty() && (getenv("BANANADS_BOOT") ? std::string(getenv("BANANADS_BOOT")) : "") == "firmware")
+        rom = "firmware";  // (boot=firmware from the environment: no game needed)
     if (rom.empty()) {
         usage();
         return 2;
@@ -108,6 +110,11 @@ int main(int argc, char** argv) {
             return 2;
         }
 
+    // boot=firmware (the DS menu, no cart): no resume spot to load or write
+    if (cfg.str("boot", "game") == "firmware") {
+        setenv("BANANADS_RESUME_ON_START", "off", 1);  // (the environment wins over the file)
+        setenv("BANANADS_RESUME_ON_QUIT", "off", 1);
+    }
     g_log_level = (int)cfg.num("log.level", 1);
     g_log_time = cfg.flag("log.time", false);
     std::string logfile = cfg.str("log.file", "");

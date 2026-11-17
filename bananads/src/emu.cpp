@@ -1008,7 +1008,9 @@ void Emu::lan_auto_tick() {
                 if (d.NumPlayers >= d.MaxPlayers) continue;
                 LAN::DiscoveryTag tag;
                 if (LAN::ReadDiscoveryTag(d, tag)) {
-                    if (tag.Nonce == lan.GetDiscoveryNonce() || memcmp(tag.GameCode, gamecode_, 4) != 0) continue;
+                    // (the DS menu's Download Play joins a host of any game)
+                    if (tag.Nonce == lan.GetDiscoveryNonce() || (!firmware_boot_ && memcmp(tag.GameCode, gamecode_, 4) != 0))
+                        continue;
                     if (!best || ip < best) best = ip;
                     if (!(tag.Flags & LAN::DiscoveryFlag_Auto) && (!by_hand || ip < by_hand)) by_hand = ip;
                 } else if (!untagged || ip < untagged)
@@ -1016,6 +1018,7 @@ void Emu::lan_auto_tick() {
             }
             if (by_hand || best) lan_auto_join(by_hand ? by_hand : best, true);
             else if (untagged) lan_auto_join(untagged, false);
+            else if (firmware_boot_) lan_auto_listen("");  // (the DS menu only joins: it looks again)
             else lan_auto_host();
             break;
         }
@@ -1274,6 +1277,47 @@ template <size_t N> static bool read_exact(const std::string& path, std::array<u
     std::vector<uint8_t> b;
     if (!read_file(path, b) || b.size() != N) return false;
     memcpy(out.data(), b.data(), N);
+    return true;
+}
+
+// boot=firmware: the user's own DS BIOS and firmware, booted to the DS menu with the cart slot empty (DS Download Play,
+// PictoChat, the settings). From the BIOS folder (BananaOS: /data/bios), named bios9.bin, bios7.bin and firmware.bin
+// or as other emulators name them. melonDS boots a firmware only with real BIOS images and a dumped (not generated)
+// firmware. A dump whose wireless calibration was blanked (0x2C-0x1FF erased: no RF settings and a MAC of
+// FF:FF:FF:FF:FF:FF, a broadcast address that no other console can answer) gets the generated firmware's calibration;
+// the MAC is set by the caller, one per handheld. `why` says what is missing.
+static bool load_user_firmware(const Config& cfg, NDSArgs& args, std::string& why) {
+    const std::string b9 = bios_file(cfg, "bios9", {"bios9.bin", "biosnds9.rom", "bios9.rom", "nds_bios_arm9.bin"});
+    const std::string b7 = bios_file(cfg, "bios7", {"bios7.bin", "biosnds7.rom", "bios7.rom", "nds_bios_arm7.bin"});
+    const std::string fp = bios_file(cfg, "firmware", {"firmware.bin", "nds_firmware.bin", "firmware.rom", "fw.bin"});
+    auto a9 = std::make_unique<ARM9BIOSImage>();
+    auto a7 = std::make_unique<ARM7BIOSImage>();
+    if (!read_exact(b9, *a9)) { why = b9 + " (4 KB)"; return false; }
+    if (!read_exact(b7, *a7)) { why = b7 + " (16 KB)"; return false; }
+    std::vector<uint8_t> raw;
+    if (!read_file(fp, raw) || (raw.size() != 0x20000 && raw.size() != 0x40000 && raw.size() != 0x80000)) {
+        why = fp + " (128, 256 or 512 KB)";
+        return false;
+    }
+    Firmware fw(raw.data(), (u32)raw.size());
+    if (!fw.IsBootable()) { why = fp + ": not a DS firmware dump"; return false; }
+    auto& h = fw.GetHeader();
+    bool calib = h.WifiConfigLength > 0 && h.WifiConfigLength <= 0x1D4;
+    if (calib) {
+        Firmware::FirmwareHeader c = h;
+        c.UpdateChecksum();
+        calib = c.WifiConfigChecksum == h.WifiConfigChecksum;
+    }
+    if (!calib) {
+        const Firmware gen(0);
+        memcpy(&h.Bytes[0x2A], &gen.GetHeader().Bytes[0x2A], sizeof(h.Bytes) - 0x2A);
+        Log(LogLevel::Warn, "[fw] %s has no wireless calibration (blanked in the dump): the generated one is used\n",
+            fp.c_str());
+    }
+    Log(LogLevel::Info, "[fw] booting the DS firmware: %s, %s, %s\n", b9.c_str(), b7.c_str(), fp.c_str());
+    args.ARM9BIOS = std::move(a9);
+    args.ARM7BIOS = std::move(a7);
+    args.Firmware = std::move(fw);
     return true;
 }
 
@@ -1607,7 +1651,7 @@ void Emu::restart() {
     std::lock_guard<std::mutex> g(net_mu_);
     nds_->Reset();
     arm9_clock();
-    nds_->SetupDirectBoot(game_ + ".nds");
+    if (!firmware_boot_) nds_->SetupDirectBoot(game_ + ".nds");
     set_clock();
     nds_->Start();
     Log(LogLevel::Info, "[emu] %s restarted\n", game_.c_str());
@@ -1683,90 +1727,107 @@ bool rom_unmap(uint8_t* p) {
 
 bool Emu::load_rom(const std::string& path) {
     if (nds_) flush_save(true);  // the cart that is about to go: its save first
-    std::unique_ptr<u8[]> romdata;
-    size_t romlen = 0, file_len = 0;
-    if (cfg_.flag("rom.map", true) && mappable(path))
-        if (uint8_t* m = map_rom(path, file_len, romlen)) {
-            romdata.reset(m);  // (melonDS's ~CartCommon gives it back through Platform::ROMRelease: rom_unmap)
-            Log(LogLevel::Info, "[emu] ROM mapped (%zu MB), read in the background\n", file_len >> 20);
-        }
-    if (!romdata) {  // rom.map=off, a removable card, or the mapping failed: read into memory, straight into the buffer
-        std::ifstream f(path, std::ios::binary | std::ios::ate);
-        const std::streamoff n = f ? (std::streamoff)f.tellg() : -1;
-        if (n >= 0x200) {
-            romlen = (size_t)n;
-            romdata = std::unique_ptr<u8[]>(new (std::nothrow) u8[romlen]);  // (not zeroed: every byte is read)
-            f.seekg(0);
-            if (!romdata || !f.read((char*)romdata.get(), n)) romdata.reset();
-        }
-    }
-    if (!romdata) {
-        Log(LogLevel::Error, "[emu] can't read the ROM %s\n", path.c_str());
-        return false;
-    }
-    {   // a .cia (DSiWare from the 3DS's eShop): its content is the DSi ROM, taken out into a buffer of its own
-        CiaContent cia;
-        const size_t have = file_len ? file_len : romlen;
-        if (cia_parse(romdata.get(), have, cia)) {
-            if (cia.encrypted) {
-                notice("This .cia is encrypted", "decrypt it on a 3DS (or a PC tool) first");
-                Log(LogLevel::Error, "[dsi] %s: the .cia's content is encrypted (it needs the 3DS's keys, which BananaDS "
-                    "doesn't have): decrypt the .cia first, or use the title's .nds/.dsi\n", path.c_str());
-                if (rom_unmap(romdata.get())) (void)romdata.release();
-                return false;
+    firmware_boot_ = cfg_.str("boot", "game") == "firmware";
+    std::unique_ptr<NDSCart::CartCommon> cart;
+    if (firmware_boot_) {  // the DS menu, the cart slot empty: no ROM, no save
+        dsi_ = false;
+        rom_path_.clear();
+        game_ = "DS firmware";
+        memset(gamecode_, 0, 4);
+        save_path_.clear();
+    } else {
+        std::unique_ptr<u8[]> romdata;
+        size_t romlen = 0, file_len = 0;
+        if (cfg_.flag("rom.map", true) && mappable(path))
+            if (uint8_t* m = map_rom(path, file_len, romlen)) {
+                romdata.reset(m);  // (melonDS's ~CartCommon gives it back through Platform::ROMRelease: rom_unmap)
+                Log(LogLevel::Info, "[emu] ROM mapped (%zu MB), read in the background\n", file_len >> 20);
             }
-            size_t len = 0x1000;
-            while (len < cia.len) len <<= 1;  // (a power of two, zero-padded: melonDS keeps the buffer as it is)
-            std::unique_ptr<u8[]> rom(new (std::nothrow) u8[len]());
-            if (!rom) return false;
-            memcpy(rom.get(), romdata.get() + cia.off, cia.len);
-            cia_tmd_.assign(cia.tmd, cia.tmd + cia.tmd_len);
-            if (rom_unmap(romdata.get())) (void)romdata.release();
-            romdata = std::move(rom);
-            romlen = len;
-            Log(LogLevel::Info, "[dsi] .cia: content of %zu bytes at 0x%zx, not encrypted\n", cia.len, cia.off);
+        if (!romdata) {  // rom.map=off, a removable card, or the mapping failed: read into memory, straight into the buffer
+            std::ifstream f(path, std::ios::binary | std::ios::ate);
+            const std::streamoff n = f ? (std::streamoff)f.tellg() : -1;
+            if (n >= 0x200) {
+                romlen = (size_t)n;
+                romdata = std::unique_ptr<u8[]>(new (std::nothrow) u8[romlen]);  // (not zeroed: every byte is read)
+                f.seekg(0);
+                if (!romdata || !f.read((char*)romdata.get(), n)) romdata.reset();
+            }
         }
-    }
-    // the console: console = auto (the default: a DSi for a game only a DSi plays, unit code 3 - DSiWare and DSi-only
-    // cartridges; a DS for the rest, DSi-enhanced games included, as they play on a DS), ds or dsi
-    {
-        const u8 unit = romdata[0x12];
-        const std::string want = cfg_.str("console", "auto");
-        dsi_ = want == "dsi" || (want != "ds" && unit == 3);
-        if (dsi_) Log(LogLevel::Info, "[dsi] DSi mode (console=%s, unit code %u)\n", want.c_str(), unit);
-    }
-    rom_path_ = path;
-    game_ = basename_noext(path);
+        if (!romdata) {
+            Log(LogLevel::Error, "[emu] can't read the ROM %s\n", path.c_str());
+            return false;
+        }
+        {   // a .cia (DSiWare from the 3DS's eShop): its content is the DSi ROM, taken out into a buffer of its own
+            CiaContent cia;
+            const size_t have = file_len ? file_len : romlen;
+            if (cia_parse(romdata.get(), have, cia)) {
+                if (cia.encrypted) {
+                    notice("This .cia is encrypted", "decrypt it on a 3DS (or a PC tool) first");
+                    Log(LogLevel::Error, "[dsi] %s: the .cia's content is encrypted (it needs the 3DS's keys, which BananaDS "
+                        "doesn't have): decrypt the .cia first, or use the title's .nds/.dsi\n", path.c_str());
+                    if (rom_unmap(romdata.get())) (void)romdata.release();
+                    return false;
+                }
+                size_t len = 0x1000;
+                while (len < cia.len) len <<= 1;  // (a power of two, zero-padded: melonDS keeps the buffer as it is)
+                std::unique_ptr<u8[]> rom(new (std::nothrow) u8[len]());
+                if (!rom) return false;
+                memcpy(rom.get(), romdata.get() + cia.off, cia.len);
+                cia_tmd_.assign(cia.tmd, cia.tmd + cia.tmd_len);
+                if (rom_unmap(romdata.get())) (void)romdata.release();
+                romdata = std::move(rom);
+                romlen = len;
+                Log(LogLevel::Info, "[dsi] .cia: content of %zu bytes at 0x%zx, not encrypted\n", cia.len, cia.off);
+            }
+        }
+        // the console: console = auto (the default: a DSi for a game only a DSi plays, unit code 3 - DSiWare and DSi-only
+        // cartridges; a DS for the rest, DSi-enhanced games included, as they play on a DS), ds or dsi
+        {
+            const u8 unit = romdata[0x12];
+            const std::string want = cfg_.str("console", "auto");
+            dsi_ = want == "dsi" || (want != "ds" && unit == 3);
+            if (dsi_) Log(LogLevel::Info, "[dsi] DSi mode (console=%s, unit code %u)\n", want.c_str(), unit);
+        }
+        rom_path_ = path;
+        game_ = basename_noext(path);
 
-    std::string savedir = cfg_.str("save.dir", "");
-    if (savedir.empty()) {
-        size_t s = path.find_last_of('/');
-        savedir = s == std::string::npos ? "." : path.substr(0, s);
-    }
-    if (cfg_.flag("save.per_game_folder", false)) savedir += "/" + game_;  // ROCKNIXDS #42/#56
-    mkdirs(savedir);
-    save_path_ = savedir + "/" + game_ + ".sav";
+        std::string savedir = cfg_.str("save.dir", "");
+        if (savedir.empty()) {
+            size_t s = path.find_last_of('/');
+            savedir = s == std::string::npos ? "." : path.substr(0, s);
+        }
+        if (cfg_.flag("save.per_game_folder", false)) savedir += "/" + game_;  // ROCKNIXDS #42/#56
+        mkdirs(savedir);
+        save_path_ = savedir + "/" + game_ + ".sav";
 
-    std::vector<uint8_t> sav;
-    NDSCart::NDSCartArgs cart_args;
-    if (read_file(save_path_, sav) && !sav.empty()) {
-        cart_args.SRAM = std::make_unique<u8[]>(sav.size());
-        memcpy(cart_args.SRAM.get(), sav.data(), sav.size());
-        cart_args.SRAMLength = (u32)sav.size();
-        Log(LogLevel::Info, "[emu] save %s (%zu bytes)\n", save_path_.c_str(), sav.size());
-    }
+        std::vector<uint8_t> sav;
+        NDSCart::NDSCartArgs cart_args;
+        if (read_file(save_path_, sav) && !sav.empty()) {
+            cart_args.SRAM = std::make_unique<u8[]>(sav.size());
+            memcpy(cart_args.SRAM.get(), sav.data(), sav.size());
+            cart_args.SRAMLength = (u32)sav.size();
+            Log(LogLevel::Info, "[emu] save %s (%zu bytes)\n", save_path_.c_str(), sav.size());
+        }
 
-    start_mark("save read");
-    auto cart = NDSCart::ParseROM(std::move(romdata), (u32)romlen, this, std::move(cart_args));
-    if (!cart) {
-        if (romdata && rom_unmap(romdata.get())) (void)romdata.release();  // (rejected before melonDS took it)
-        Log(LogLevel::Error, "[emu] %s isn't a DS ROM melonDS can load\n", path.c_str());
-        return false;
+        start_mark("save read");
+        cart = NDSCart::ParseROM(std::move(romdata), (u32)romlen, this, std::move(cart_args));
+        if (!cart) {
+            if (romdata && rom_unmap(romdata.get())) (void)romdata.release();  // (rejected before melonDS took it)
+            Log(LogLevel::Error, "[emu] %s isn't a DS ROM melonDS can load\n", path.c_str());
+            return false;
+        }
+        memcpy(gamecode_, cart->GetHeader().GameCode, 4);  // (the LAN beacon's tag: Auto finds hosts of this game)
     }
-    memcpy(gamecode_, cart->GetHeader().GameCode, 4);  // (the LAN beacon's tag: Auto finds hosts of this game)
 
     NDSArgs args;  // FreeBIOS and a generated firmware: no BIOS or firmware files needed, as with DraStic
     if (dsi_) args.Firmware = Firmware(1);  // (a DSi's generated firmware)
+    if (firmware_boot_) {
+        std::string why;
+        if (!load_user_firmware(cfg_, args, why)) {
+            Log(LogLevel::Error, "[fw] boot=firmware needs the DS's BIOS and firmware: missing or wrong: %s\n", why.c_str());
+            return false;
+        }
+    }
     args.OutputSampleRate = 48000.0;
     if (!cfg_.flag("jit", true)) args.JIT = std::nullopt;
 #ifdef BANANADS_JIT
@@ -1814,6 +1875,8 @@ bool Emu::load_rom(const std::string& path) {
     const auto mac = wm.mac;
     Log(LogLevel::Info, "[wifi] the DS's MAC: %s (%s)\n", format_mac(mac).c_str(), wm.source.c_str());
     memcpy(hdr.MacAddr.data(), mac.data(), 6);
+    if (firmware_boot_) wfc_path_.clear();  // (the user's firmware keeps its own name, language and access points)
+    if (!firmware_boot_) {
     auto& user = args.Firmware.GetEffectiveUserData();
     std::string nick = cfg_.str("firmware.nickname", "BananaDS");
     user.NameLength = (u16)std::min<size_t>(nick.size(), 10);
@@ -1831,6 +1894,7 @@ bool Emu::load_rom(const std::string& path) {
         } else if (r == 0)
             Log(LogLevel::Info, "[wifi] no WFC settings saved yet (%s): the game makes them at its first WFC "
                 "connection\n", wfc_path_.c_str());
+    }
     }
     args.Firmware.UpdateChecksums();
     wfc_last_.clear();
@@ -2135,7 +2199,7 @@ bool Emu::load_rom(const std::string& path) {
     }
     else nds_ = std::make_unique<NDS>(std::move(args), this);
     start_mark("NDS created");
-    nds_->SetNDSCart(std::move(cart));
+    if (cart) nds_->SetNDSCart(std::move(cart));
     start_mark("cart in");
     nds_->Reset();
 #ifdef BANANADS_LAN
@@ -2143,7 +2207,7 @@ bool Emu::load_rom(const std::string& path) {
 #endif
     start_mark("reset");
     arm9_clock();
-    nds_->SetupDirectBoot(game_ + ".nds");
+    if (!firmware_boot_) nds_->SetupDirectBoot(game_ + ".nds");
     start_mark("direct boot");
     debug_pc_ = (uint64_t)std::max(0L, cfg_.num("debug.pc", 0));
     idle_stats_ = (unsigned)std::max(0L, cfg_.num("core.idle_stats", 0));
