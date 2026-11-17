@@ -1,8 +1,8 @@
-From d53c60317ea88336804c97dd3d4d1833154c6d82 Mon Sep 17 00:00:00 2001
+From 5139ba94fe212ca3954af5addd2a3de212c078e7 Mon Sep 17 00:00:00 2001
 From: Pixelado Dev <350114043+pixeladodev@users.noreply.github.com>
 Date: Tue, 17 Nov 2026 02:29:21 -0500
-Subject: [PATCH] LAN: a DS Download Play host takes MP replies as they come,
- no wait per command
+Subject: [PATCH] LAN: BANANADS_LAN_DLPLAY_PIPELINE=1, a DS Download Play host
+ that takes MP replies as they come (experiment, off)
 
 ---
  src/net/LAN.cpp | 74 +++++++++++++++++++++++++++++++++++++++++++++++--
@@ -10,22 +10,22 @@ Subject: [PATCH] LAN: a DS Download Play host takes MP replies as they come,
  2 files changed, 77 insertions(+), 2 deletions(-)
 
 diff --git a/src/net/LAN.cpp b/src/net/LAN.cpp
-index f62c46f..79eacea 100644
+index f62c46f..a733b39 100644
 --- a/src/net/LAN.cpp
 +++ b/src/net/LAN.cpp
 @@ -64,6 +64,49 @@ const u32 kLocalhost = 0x0100007F;
  // MPRecvTimeout wait) is no longer waited for, until it sends us a reply or an auth/association request again
  const int kMPMaxMisses = 20;
  
-+// BananaDS: DS Download Play. Its host sends ~10 MP commands a frame with the game's data, and the wait for each
-+// reply is a round trip over Wi-Fi (3-5 ms between two handhelds through a router): 10 of them a frame took the
-+// host to ~20-30 fps and its sound with it. While we send DS Download Play beacons (beacon type 0Bh, multiboot, in
-+// Nintendo's DDh element; GBATEK "DS Wifi Nintendo Beacons"), RecvReplies does not wait: each MP command gets the
-+// replies already in, up to kMultibootReplyWindowUS old (so a command usually gets the reply to one sent a few
-+// before it). DS Download Play is built for lost replies (a child that did not answer is sent the block again),
-+// so this costs some of the transfer's speed, not the transfer. A child that stops replying is not counted out
-+// meanwhile. Back to the usual wait 2 s after the last such beacon (the game itself, after the download, sends its
-+// own beacons). BANANADS_LAN_DLPLAY_PIPELINE=0 turns it off.
++// BananaDS: DS Download Play, an experiment, off unless BANANADS_LAN_DLPLAY_PIPELINE=1. Its host sends ~10 MP
++// commands a frame with the game's data, and the wait for each reply is a round trip over Wi-Fi (3-5 ms between
++// two handhelds through a router): the host runs at ~20-30 fps while it sends. With the variable set, while we
++// send DS Download Play beacons (beacon type 0Bh, multiboot, in Nintendo's DDh element; GBATEK "DS Wifi Nintendo
++// Beacons"), RecvReplies does not wait: each MP command gets the replies already in, up to
++// kMultibootReplyWindowUS old. The host then runs at full speed, but the download never completes (two handhelds,
++// 2026-11-17: the child stays on "Downloading data..."): a reply that answered an earlier command is taken, and
++// acknowledged in our ACK, as the answer to this one, so the child believes its newer reply arrived and the two
++// sides of the transfer no longer agree. Back to the usual wait 2 s after the last such beacon.
 +const u32 kMultibootBeaconHoldMS = 2000;
 +const u64 kMultibootReplyWindowUS = 100000;
 +
@@ -35,7 +35,7 @@ index f62c46f..79eacea 100644
 +    if (v < 0)
 +    {
 +        const char* e = getenv("BANANADS_LAN_DLPLAY_PIPELINE");
-+        v = (e && e[0] == '0') ? 0 : 1;
++        v = (e && e[0] == '1') ? 1 : 0;
 +    }
 +    return v == 1;
 +}

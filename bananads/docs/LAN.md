@@ -164,11 +164,14 @@ own screens) ends its session and waits; with others in it, after 30 s off. A UD
   and 1 again around every CMD, and with 0099 alone 2 of 3 early blanks were frames at the end (two handhelds over
   the direct link, 2026-10-29: the host got blanks, the session failed before "Guardando"). The diag line adds
   `left to the reception's end default= blank=` and `early frames late as default= blank=`.
-- **0103** (LAN, DS Download Play host): while we send DS Download Play beacons (type 0Bh in Nintendo's DDh
-  element), `RecvReplies` doesn't wait for the players' replies: each MP command gets the replies already in, up to
-  100 ms old, and a player that doesn't reply isn't counted out. The download sends ~10 MP commands a frame, and a
-  round trip over Wi-Fi each (3-5 ms between two handhelds through a router) took the host to 20-30 fps. Lost or
-  late replies cost transfer speed (DS Download Play sends a block again), not frames. The usual wait comes back
-  2 s after the last such beacon ("LAN: DS Download Play host: ..." in the log at both changes).
-  `BANANADS_LAN_DLPLAY_PIPELINE=0` turns it off.
+- **0103** (LAN, DS Download Play host, an experiment, off): with `BANANADS_LAN_DLPLAY_PIPELINE=1`, while we send
+  DS Download Play beacons (type 0Bh in Nintendo's DDh element), `RecvReplies` doesn't wait for the players'
+  replies: each MP command gets the replies already in, up to 100 ms old, and a player that doesn't reply isn't
+  counted out. The download sends ~10 MP commands a frame, and the round trip over Wi-Fi for each (3-5 ms between
+  two handhelds through a router) takes the host to 20-30 fps. Without the wait the host keeps its speed, but the
+  download never completes (two handhelds, the child stays on "Downloading data..."): a reply that answered an
+  earlier command is taken, and acknowledged in the host's ACK, as the answer to the current one, so the child
+  believes its newer reply arrived and the two sides of the transfer no longer agree. A DS MP command needs its
+  own replies before the host's ACK, so the wait stays unless the variable is set. The usual wait comes back 2 s
+  after the last such beacon ("LAN: DS Download Play host: ..." in the log at both changes).
 - Their other "[diag]" traces log at the Debug level only (`log.level = 0`).
