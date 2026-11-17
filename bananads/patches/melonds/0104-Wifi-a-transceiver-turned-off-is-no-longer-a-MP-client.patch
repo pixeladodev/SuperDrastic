@@ -1,0 +1,35 @@
+From 02759d4f12c459e7a5f7e70f2ad41ed3adc6b4c2 Mon Sep 17 00:00:00 2001
+From: Pixelado Dev <350114043+pixeladodev@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 04:12:17 -0500
+Subject: [PATCH] Wifi: a transceiver turned off is no longer a MP client
+
+---
+ src/Wifi.cpp | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/src/Wifi.cpp b/src/Wifi.cpp
+index fb7948c..c57c75b 100644
+--- a/src/Wifi.cpp
++++ b/src/Wifi.cpp
+@@ -682,6 +682,18 @@ void Wifi::UpdatePowerOn()
+ 
+         NDS.CancelEvent(Event_Wifi);
+ 
++        // BananaDS: a transceiver that is off is no longer anyone's MP client. A DS Download Play child that reboots
++        // into the downloaded program turns the wifi off and on with no deauth from either side (Mario Party DS);
++        // left set, IsMPClient had the scheduler call CheckRX(2) on every tick past NextSync, each call a full
++        // MPRecvTimeout wait for a host that no longer talks to it: a frame took seconds, the program never saw the
++        // host's beacons again to rejoin, and quitting waited for the frame.
++        if (IsMPClient)
++            Log(LogLevel::Info, "[CLIENT] wifi off: no longer a MP client\n");
++        IsMP = false;
++        IsMPClient = false;
++        NextSync = 0;
++        RXTimestamp = 0;
++
+         Log(LogLevel::Debug, "[diag] wifi powered off: MP_End\n");
+         Platform::MP_End(NDS.UserData);
+     }
+-- 
+2.56.0
+

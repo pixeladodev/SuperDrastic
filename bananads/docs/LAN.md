@@ -174,4 +174,12 @@ own screens) ends its session and waits; with others in it, after 30 s off. A UD
   believes its newer reply arrived and the two sides of the transfer no longer agree. A DS MP command needs its
   own replies before the host's ACK, so the wait stays unless the variable is set. The usual wait comes back 2 s
   after the last such beacon ("LAN: DS Download Play host: ..." in the log at both changes).
+- **0104** (Wifi, always on): a transceiver the game turns off is no longer a MP client (`IsMP`, `IsMPClient` and
+  the sync time cleared, "[CLIENT] wifi off: no longer a MP client" in the log). A DS Download Play child that
+  reboots into the downloaded program turns its wifi off and on, and with Mario Party DS neither side sends a
+  deauth first: the client flag stayed set, so every Wi-Fi tick past the sync time asked for a host frame and
+  waited the full MP receive timeout (25 ms) for a host that no longer sent it any. The child's frames took
+  seconds (black screen, the host's "communication error"), it never read the host's new beacons to join the
+  game, and F + START waited for the frame in progress (~10 s). Mario Kart DS ends the download with a deauth,
+  which already cleared the flag. A powered-off transceiver keeps no association on the real hardware either.
 - Their other "[diag]" traces log at the Debug level only (`log.level = 0`).
