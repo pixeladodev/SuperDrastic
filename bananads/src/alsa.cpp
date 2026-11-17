@@ -41,7 +41,6 @@ struct Alsa {
     bool servo;        // audio.servo: the rate servo (below)
     bool stretch;      // audio.stretch: the servo stretches time (pitch kept), not the resampler's rate
     int servo_target;  // audio.servo_target: the SPU backlog it holds, in frames
-    double min_tempo;  // audio.min_tempo: the slowest the stretch plays (below)
     int first_prime;   // the backlog the sound first waits for (audio.first_prime: twice the target, below)
     bool stats;        // audio.stats: a line every 10 s (short chunks, the servo's range)
     std::string dump;  // audio.dump: <path>.in.raw (the game's sound) and <path>.out.raw (what ALSA plays), 48 kHz s16 stereo
@@ -232,7 +231,7 @@ static void out_thread(Alsa* a) {
                 rate = std::clamp(1.0 + integ + 0.002 * err, 0.995, 1.005);
                 double want = 1.0;
                 if ((tempo < 1.0 || avg < 0.25 * a->servo_target) && !(speed >= 0.985 && err > -0.5))
-                    want = std::clamp(speed * (1.0 + 0.25 * err), a->min_tempo, 1.0);
+                    want = std::clamp(speed * (1.0 + 0.25 * err), 0.6, 1.0);
                 tempo += std::clamp(want - tempo, -0.0015, 0.0015);
                 if (want == 1.0 && tempo > 0.998) tempo = 1.0;
                 skew = rate * tempo;
@@ -409,12 +408,6 @@ Alsa* alsa_start(Emu& emu, const Config& cfg) {
     // and New Super Mario Bros. resumes on the Plus, with kms.lowlat (nothing run ahead to cover them) and without.
     // audio.first_prime (2): that many targets the first time; later primings (after a pause, a load) wait for one
     a->first_prime = (int)(std::clamp(atof(cfg.str("audio.first_prime", "2").c_str()), 1.0, 4.0) * a->servo_target);
-    // audio.min_tempo (0.45): the slowest tempo the stretch follows the game down to. It was 0.6: a game held near
-    // half speed (a DS wireless game whose host waits on every one of its ~6 messages a frame: Mario Party DS runs at
-    // 29-30 fps) made fewer samples than even 0.6 plays, so the buffer ran dry every few hundred ms, the sound went
-    // silent until 60 ms were made again, and came back: it stuttered and fell behind. At 0.45 it plays on, in step
-    // with the picture and with its pitch kept, only slower
-    a->min_tempo = std::clamp(atof(cfg.str("audio.min_tempo", "0.45").c_str()), 0.3, 1.0);
     a->stats = cfg.flag("audio.stats", false);
     a->close_child = cfg.flag("audio.close_child", true);
     a->mic_idle = cfg.flag("mic.idle_stop", true);
