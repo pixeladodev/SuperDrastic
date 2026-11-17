@@ -115,8 +115,9 @@ own screens) ends its session and waits; with others in it, after 30 s off. A UD
   (`Emu::runahead_ok`), and a frame run ahead sends and takes in nothing on the LAN.
 - `wfcsettings.bin` (Nintendo WFC's settings) is saved, atomically, in desktop melonDS's layout, so the WFC ID
   isn't registered again after every restart.
-- Each console gets a DS MAC of its own (`wifi.mac`, else one kept in `wifi-mac`, made from the eMMC CID, wlan0 or
-  at random; always 00:09:BF), so two handhelds don't clash.
+- Each console's DS MAC is BananaDS's own (00:09:BF plus the FNV-1a of `/etc/machine-id`), in the generated firmware
+  and in the user's firmware (`boot=firmware`) alike, so two handhelds don't clash and every BananaDS on a console is
+  the same DS to a game's WFC ID.
 
 ## melonDS patches (patches/melonds)
 

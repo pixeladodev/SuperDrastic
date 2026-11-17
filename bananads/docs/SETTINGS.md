@@ -133,8 +133,6 @@ key can also come from the environment as `BANANADS_<KEY>` (dots become undersco
 | `wifi.local_auto_start` | `wifi` | `auto`: `wifi` waits for the game to turn its wifi on; `now` starts at once (for tests with a game that doesn't) |
 | `wifi.local_auto_test_wifi` | (none) | `auto`, for tests: the game's wifi as a script by frame, e.g. `on@0,off@2400,on@2500` (instead of the DS's own) |
 | `wifi.local_test_mode` | (none) | for tests: the LAN page's Mode row picked by frame, `<mode>@<frame>` (`off`, `auto`, `host`, `join`), e.g. `off@1500,auto@1500` (two at one frame are carried out together, in order) |
-| `wifi.mac` | (none) | the DS's MAC (`00:09:bf:12:34:56`), over the saved one (not saved itself) |
-| `wifi.mac_file` | `wifi-mac` | where the DS's MAC is kept (under `BANANADS_DATA`; `off`: not kept). Made once (from the eMMC's CID, else wlan0's MAC, else at random; the old 00:09:BF:11:22:33 if WFC settings were saved before it) and never changed. So deleting it while keeping `wfc_settings` brings back the shared 00:09:BF:11:22:33 (the case meant for settings saved before this file existed); to get a MAC of the handheld's own again, delete both (the game then makes a new WFC ID) |
 | `wifi.wfc_settings` | `wfcsettings.bin` | where the Nintendo WFC settings the game writes (its WFC ID) are kept between sessions, melonDS's 2304-byte file (under `BANANADS_DATA`; `off`: not kept, a new WFC ID every session) |
 | `mic.source` | `device` | `device` (ALSA or SDL capture) or `none` (only the menu's Blow) |
 | `mic.device` | `default` | the ALSA capture device |
