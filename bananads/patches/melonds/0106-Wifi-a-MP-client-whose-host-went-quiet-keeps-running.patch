@@ -1,0 +1,98 @@
+From 421d46f068d659d7b3de0824618f476f7688d35b Mon Sep 17 00:00:00 2001
+From: Pixelado Dev <350114043+pixeladodev@users.noreply.github.com>
+Date: Tue, 17 Nov 2026 08:30:51 -0500
+Subject: [PATCH] Wifi: a MP client whose host went quiet keeps running
+
+---
+ src/Wifi.cpp | 28 ++++++++++++++++++++++++++++
+ src/Wifi.h   |  7 +++++++
+ 2 files changed, 35 insertions(+)
+
+diff --git a/src/Wifi.cpp b/src/Wifi.cpp
+index c57c75b..fcddf63 100644
+--- a/src/Wifi.cpp
++++ b/src/Wifi.cpp
+@@ -551,6 +551,8 @@ void Wifi::Reset()
+     IsMPClient = false;
+     NextSync = 0;
+     RXTimestamp = 0;
++    HostQuietSince = 0;
++    HostQuietCount = 0;
+ 
+     WifiAP->Reset();
+ }
+@@ -693,6 +695,7 @@ void Wifi::UpdatePowerOn()
+         IsMPClient = false;
+         NextSync = 0;
+         RXTimestamp = 0;
++        HostQuietCount = 0;
+ 
+         Log(LogLevel::Debug, "[diag] wifi powered off: MP_End\n");
+         Platform::MP_End(NDS.UserData);
+@@ -1991,6 +1994,30 @@ bool Wifi::CheckRX(int type) // 0=regular 1=MP replies 2=MP host frames
+                 IsMP = false;
+                 IsMPClient = false;
+             }
++            else if (rxlen == 0 && IsMPClient)
++            {
++                // BananaDS: a host that stopped talking (its game quit while the session stays up, as a Banana Party
++                // room keeps it) doesn't hold this console. Each tick past NextSync waits a full MP receive timeout
++                // for it, and NextSync only moves with a host frame: emulated time stood still, a frame took ~50 s
++                // (2069 waits of 25 ms), the picture froze and a quit waited for the frame. After a few timeouts in
++                // a row the next wait is a frame of emulated time away, so the game runs on and sees the link go
++                // as a DS would; after kHostGoneMS of silence it is no longer a MP client.
++                const u64 now = Platform::GetMSCount();
++                if (!HostQuietCount++) HostQuietSince = now;
++                if (now - HostQuietSince >= kHostGoneMS)
++                {
++                    Log(LogLevel::Info, "[CLIENT] the host has sent nothing for %llu ms: no longer a MP client\n",
++                        (unsigned long long)(now - HostQuietSince));
++                    IsMP = false;
++                    IsMPClient = false;
++                    NextSync = 0;
++                    RXTimestamp = 0;
++                    HostQuietCount = 0;
++                }
++                else if (HostQuietCount > kHostQuietTries)
++                    NextSync = USTimestamp + kHostQuietStepUS;
++            }
++            if (rxlen > 0) HostQuietCount = 0;
+         }
+ 
+         if (rxlen <= 0) return false;
+@@ -2074,6 +2101,7 @@ bool Wifi::CheckRX(int type) // 0=regular 1=MP replies 2=MP host frames
+             IsMP = true;
+             IsMPClient = true;
+             USTimestamp = timestamp;
++            HostQuietCount = 0;
+             NextSync = RXTimestamp + (framelen * (txrate==0x14 ? 4:8));
+         }
+ 
+diff --git a/src/Wifi.h b/src/Wifi.h
+index 36595f4..6476bbf 100644
+--- a/src/Wifi.h
++++ b/src/Wifi.h
+@@ -187,6 +187,11 @@ private:
+     static const u8 MPAckMAC[6];
+ 
+     static const int kTimerInterval = 8;
++    // BananaDS: a MP client's waits for a host that went quiet (Wifi::CheckRX): this many timeouts in a row are
++    // waited each tick as before (a hiccup), then one a frame of emulated time; after kHostGoneMS it leaves MP
++    static const int kHostQuietTries = 4;
++    static const u64 kHostQuietStepUS = 16000;
++    static const u64 kHostGoneMS = 3000;
+     static const u32 kTimeCheckMask = ~(kTimerInterval - 1);
+ 
+     bool Enabled;
+@@ -251,6 +256,8 @@ private:
+     bool IsMP;
+     bool IsMPClient;
+     u64 NextSync;           // for clients: timestamp for next sync point
++    u64 HostQuietSince;     // for clients: when the host's frames stopped coming (ms), with HostQuietCount waits
++    int HostQuietCount;     // for clients: the waits for a host frame in a row that timed out
+     u64 RXTimestamp;
+ 
+     class WifiAP* WifiAP;
+-- 
+2.56.0
+

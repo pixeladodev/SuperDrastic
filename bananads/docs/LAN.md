@@ -191,4 +191,12 @@ own screens) ends its session and waits; with others in it, after 30 s off. A UD
   game that sends several MP commands a frame (Mario Party DS: ~180 a second, against ~55 for Mario Kart DS's
   race) pays it most. With `BANANADS_LAN_TIMEOUT_MS` set, "[diag] LAN enet:" adds each peer's ENet round trip and
   throttle (32 of 32: nothing dropped) to the per-second lines.
+- **0106** (Wifi, always on): a MP client whose host went quiet keeps running. When the host's game quits and its
+  session stays up (a Banana Party room keeps it, and its room re-announces itself), nothing tells the client the
+  host is gone: every Wi-Fi tick past the sync time waited the full MP receive timeout for a host frame, and the
+  sync time only moves with one, so emulated time stood still (one frame took ~52 s: 2069 waits of 25 ms), the
+  picture froze and F + START waited for the frame. Now after 4 timeouts in a row the next wait is a frame (16 ms)
+  of emulated time away, so the game runs on and meets the lost link as a DS does (its own error screen), and after
+  3 s with nothing from the host it is no longer a MP client ("[CLIENT] the host has sent nothing for ... ms" in the
+  log). A host frame resets the count; a hiccup of a timeout or two waits as before.
 - Their other "[diag]" traces log at the Debug level only (`log.level = 0`).
