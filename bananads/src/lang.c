@@ -178,9 +178,19 @@ int lang_init(const char *part) {
         nE++;
     }
     free(l); fclose(f);
-    /* Banana Lobby's menu row, until the language pack ships it. English stays the key. */
-    {
-        const char *en = "Local multiplayer", *tr = "Multijugador local";
+    /* Banana Party's lines, until the language pack ships them. English stays the key. */
+    static const char *const own[][2] = {
+        { "Local multiplayer", "Multijugador local" },
+        { "Auto Join", "Unirse automáticamente" },
+        { "Turn on Auto Join", "Activar Unirse automáticamente" },
+        { "Auto Join, looking...", "Unirse automáticamente, buscando..." },
+        { "Auto Join: looking for a host...", "Unirse automáticamente: buscando anfitrión..." },
+        { "It joins a host it finds, and never hosts.", "Se une al anfitrión que encuentre y nunca es anfitrión." },
+        { "A Party does not keep the resume spot.", "Una Party no guarda el punto de reanudación." },
+        { "The host closed the Party", "El anfitrión cerró la Party" },
+    };
+    for (size_t k = 0; k < sizeof own / sizeof own[0]; k++) {
+        const char *en = own[k][0], *tr = own[k][1];
         int have = 0;
         for (int i = 0; i < nE && !have; i++) have = !strcmp(E[i].en, en);
         if (!have) {
