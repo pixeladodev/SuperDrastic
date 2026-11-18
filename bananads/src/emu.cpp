@@ -1140,7 +1140,7 @@ void Emu::lan_refresh(bool now) {
                 lan_st_.mode = LanMode::Off;
                 lan_st_.state = LanState::Idle;
                 lan_st_.addr.clear();
-                lan_st_.msg = "The host closed the room";
+                lan_st_.msg = "The host closed the Party";
                 lan_st_.players.clear();
                 lan_st_.hosts.clear();
             }

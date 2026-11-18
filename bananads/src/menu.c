@@ -1455,7 +1455,7 @@ static void draw_bottom(void) {
         dialog(c, t, b, "Cancel", "Replace", 0);
     } else if (scr == SC_QUIT && H.resume_on && H.quit_nosave)   /* saving the spot first; quitting without it, under it */
         dialog3(c, "Quit to the menu?",
-                H.no_spot ? "A lobby does not keep the resume spot."
+                H.no_spot ? "A Party does not keep the resume spot."
                           : "Your spot is saved. Next time the game picks up right here.",
                 "Keep playing", "Save and quit", 0, "Quit without saving", H.no_spot);
     else if (scr == SC_QUIT)
