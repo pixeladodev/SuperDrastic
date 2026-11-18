@@ -17,9 +17,10 @@ not expect it to work through a VPN or any sort of tunnel.
 
 - **No Connection row.** Mode is the first row. Play is over the Wi-Fi network the console is on: Host on one,
   Join or Auto on the others.
-- **Mode: Off / Auto / Host / Join**, changed while the game runs, without a restart, and kept in `bananads.conf`
-  (`wifi.local = off | auto | host | join`; `join` looks for hosts at the start, `join:<address>` joins that host
-  directly). `BANANADS_WIFI_LOCAL` / `BANANADS_WIFI_LOCAL_PLAYERS` in the environment still win at each start, and
+- **Mode: Off / Auto / Auto Join / Host / Join**, changed while the game runs, without a restart, and kept in
+  `bananads.conf` (`wifi.local = off | auto | host | join`; `join` looks for hosts at the start, `join:<address>`
+  joins that host directly). Auto Join (`wifi.local = autojoin`, not kept by the page, like Auto) is Auto that never
+  hosts: it looks for a host and joins it, and keeps looking until it finds one. `BANANADS_WIFI_LOCAL` / `BANANADS_WIFI_LOCAL_PLAYERS` in the environment still win at each start, and
   the page says so in red.
 - **Players** (2-16, 4 by default, `wifi.local_players`): only with Host on the Mode row; greyed, "Turn Host on to
   change it", until Host is on, and while others are in its session. Auto hosts with the same count.

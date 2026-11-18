@@ -2042,7 +2042,7 @@ static int mh_lan_get(void*, bmenu_lan* st) {
     const Emu::LanStatus l = g_lan_emu->lan_status();
     if (!l.built) return 0;
     st->mode = l.mode == Emu::LanMode::Host ? BM_LAN_HOST : l.mode == Emu::LanMode::Join ? BM_LAN_JOIN
-             : l.mode == Emu::LanMode::Auto ? BM_LAN_AUTO : BM_LAN_OFF;
+             : l.mode == Emu::LanMode::Auto ? (l.join_only ? BM_LAN_AUTO_JOIN : BM_LAN_AUTO) : BM_LAN_OFF;
     static const int phases[] = {BM_AUTO_WAIT, BM_AUTO_SEARCH, BM_AUTO_JOINING, BM_AUTO_HOST, BM_AUTO_JOINED,
                                  BM_AUTO_ONLINE, BM_AUTO_HELD};   // (Emu::AutoPhase's order)
     st->phase = phases[(int)l.phase];
@@ -2094,8 +2094,8 @@ static int mh_lan_get(void*, bmenu_lan* st) {
 static void mh_lan_set(void*, int mode, int max_players, const char* addr) {
     if (!g_lan_emu) return;
     const Emu::LanMode m = mode == BM_LAN_HOST ? Emu::LanMode::Host : mode == BM_LAN_JOIN ? Emu::LanMode::Join
-                         : mode == BM_LAN_AUTO ? Emu::LanMode::Auto : Emu::LanMode::Off;
-    g_lan_emu->lan_request(m, addr ? addr : "", max_players);
+                         : mode == BM_LAN_AUTO || mode == BM_LAN_AUTO_JOIN ? Emu::LanMode::Auto : Emu::LanMode::Off;
+    g_lan_emu->lan_request(m, addr ? addr : "", max_players, mode == BM_LAN_AUTO_JOIN);
     // Auto is not a saved mode. Host, guest (with the address) and off are written when the
     // emulator's thread applies them. Host's size is written here.
     if (m == Emu::LanMode::Host && max_players >= 2)

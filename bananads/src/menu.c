@@ -843,16 +843,17 @@ static int cheats_off(void) { return mp_locked; }   /* a code changes the game t
 static bmenu_lan LS;
 static int lan_pick, lan_max_pick, sel_lan, sel_host, top_host, lan_joining;
 static long long lan_polled;
-static const char *const lan_mode_name[BM_LAN_MODES] = { "Off", "Host", "Join", "Auto" };
-static const int lan_cycle[BM_LAN_MODES] = { BM_LAN_OFF, BM_LAN_AUTO, BM_LAN_HOST, BM_LAN_JOIN };   /* the Mode row's order */
-static int lan_hosting(void) { return LS.mode == BM_LAN_HOST || (LS.mode == BM_LAN_AUTO && LS.phase == BM_AUTO_HOST); }
+static const char *const lan_mode_name[BM_LAN_MODES] = { "Off", "Host", "Join", "Auto", "Auto Join" };
+static const int lan_cycle[BM_LAN_MODES] = { BM_LAN_OFF, BM_LAN_AUTO, BM_LAN_AUTO_JOIN, BM_LAN_HOST, BM_LAN_JOIN };   /* the Mode row's order */
+static int lan_auto(int mode) { return mode == BM_LAN_AUTO || mode == BM_LAN_AUTO_JOIN; }   /* Auto Join is Auto that never hosts */
+static int lan_hosting(void) { return LS.mode == BM_LAN_HOST || (lan_auto(LS.mode) && LS.phase == BM_AUTO_HOST); }
 enum { LR_MODE, LR_PLAYERS, LR_HOSTS, LR_LEAVE, LR_LINK };
 static int lrows[5], nlrows;
 static int lan_locked(void) { return live_ || (H.mp_lock && H.mp_lock(H.ctx)); }   /* a local wireless game is on */
 /* Auto in a local wireless game: the Mode row offers Off (asked first, as a Disconnect), nothing else */
 /* others in the session (a host's guests, or a host we joined): another mode asks first (SC_LAN_SWITCH) */
 static int lan_with_others(void) { return LS.state == BM_LAN_READY && (LS.nplayers > 1 || !lan_hosting()); }
-static int lan_auto_off_only(void) { return LS.mode == BM_LAN_AUTO && !LS.no_net && lan_locked(); }
+static int lan_auto_off_only(void) { return lan_auto(LS.mode) && !LS.no_net && lan_locked(); }
 static int lan_poll(void) {   /* the frontend's state into LS; 1: it changed */
     static bmenu_lan n;
     memset(&n, 0, sizeof n);
@@ -896,9 +897,9 @@ static int lan_players_off(void) { return LS.mode != BM_LAN_HOST || lan_locked()
 static const char *lan_short(char *v, size_t n) {   /* Quick settings' value for the row */
     if (LS.no_net) snprintf(v, n, "No Wi-Fi");
     else if (LS.mode == BM_LAN_OFF) snprintf(v, n, "Off");
-    else if (LS.mode == BM_LAN_AUTO) {
+    else if (lan_auto(LS.mode)) {
         switch (LS.phase) {
-        case BM_AUTO_SEARCH: snprintf(v, n, "Auto, looking..."); break;
+        case BM_AUTO_SEARCH: snprintf(v, n, LS.mode == BM_LAN_AUTO_JOIN ? "Auto Join, looking..." : "Auto, looking..."); break;
         case BM_AUTO_JOINING: snprintf(v, n, "Auto, joining..."); break;
         case BM_AUTO_HOST: snprintf(v, n, "Auto: host, %d of %d", LS.nplayers, LS.max_players); break;
         case BM_AUTO_JOINED: snprintf(v, n, "Auto: joined, %d of %d", LS.nplayers, LS.max_players); break;
@@ -1239,9 +1240,14 @@ static void draw_bottom(void) {
                      ? "The other console: Connection Direct, Mode Host. This console leaves its Wi-Fi network meanwhile."
                      : "This console leaves its Wi-Fi network meanwhile. Do the same on the other consoles.";
         }
-        else if (LS.mode == BM_LAN_AUTO) {
+        else if (lan_auto(LS.mode)) {
             switch (LS.phase) {
-            case BM_AUTO_SEARCH: snprintf(l, sizeof l, "Auto: looking for a host of this game..."); break;
+            case BM_AUTO_SEARCH:
+                if (LS.mode == BM_LAN_AUTO_JOIN) {
+                    snprintf(l, sizeof l, "Auto Join: looking for a host...");
+                    auto_why = "It joins a host it finds, and never hosts.";
+                } else snprintf(l, sizeof l, "Auto: looking for a host of this game...");
+                break;
             case BM_AUTO_JOINING: snprintf(l, sizeof l, "Auto: joining %s...", LS.addr); break;
             case BM_AUTO_HOST:
                 snprintf(l, sizeof l, LS.nplayers > 1 ? "Auto: hosting, %d of %d players" : "Auto: hosting, waiting for players (%d of %d)",
@@ -1304,7 +1310,7 @@ static void draw_bottom(void) {
             if (n > 1) { text_raw(c, &F_REG, l2, x0 + S(18), ty, S(16), C_BODY, tw, 0); ty += S(22); }
             ty += S(4);
         }
-        if (locked) { text(c, &F_REG, LS.mode == BM_LAN_AUTO ? "A local wireless game is on: only Off until it ends" : "A local wireless game is on: only Disconnect until it ends", x0 + S(18), ty, S(16), C_CYAN, tw, 0); ty += S(24); }
+        if (locked) { text(c, &F_REG, lan_auto(LS.mode) ? "A local wireless game is on: only Off until it ends" : "A local wireless game is on: only Disconnect until it ends", x0 + S(18), ty, S(16), C_CYAN, tw, 0); ty += S(24); }
         if (LS.env[0]) {   /* bananads.env wins over this page at each start: said, or a leftover line would win unseen */
             snprintf(l, sizeof l, "%s is set in the environment (bananads.env): it wins at each start", LS.env);
             int n = wrap2(&F_REG, l, S(16), tw, l1, l2, sizeof l1, 1);
@@ -1420,7 +1426,7 @@ static void draw_bottom(void) {
     else if (s == SC_LAN) {
         const int id = nlrows ? lrows[sel_lan] : LR_MODE;
         if (id == LR_MODE && lan_auto_off_only()) al = lan_pick == BM_LAN_OFF ? "Turn off" : "OK";
-        else if (id == LR_MODE) al = lan_locked() || LS.no_net ? "OK" : lan_pick != LS.mode ? (lan_pick == BM_LAN_HOST ? "Start hosting" : lan_pick == BM_LAN_JOIN ? "Look for hosts" : lan_pick == BM_LAN_AUTO ? "Turn on Auto" : "Turn off")
+        else if (id == LR_MODE) al = lan_locked() || LS.no_net ? "OK" : lan_pick != LS.mode ? (lan_pick == BM_LAN_HOST ? "Start hosting" : lan_pick == BM_LAN_JOIN ? "Look for hosts" : lan_pick == BM_LAN_AUTO ? "Turn on Auto" : lan_pick == BM_LAN_AUTO_JOIN ? "Turn on Auto Join" : "Turn off")
                               : LS.mode == BM_LAN_JOIN && LS.state != BM_LAN_READY ? "Hosts" : "OK";
         else if (id == LR_PLAYERS) al = !lan_players_off() && LS.mode == BM_LAN_HOST && lan_max_pick != LS.max_players ? "Apply" : "OK";
         else if (id == LR_LINK) al = lan_link_off() ? "OK" : "Change";
@@ -1478,7 +1484,7 @@ static void draw_bottom(void) {
     else if (scr == SC_LAN_LEAVE)
         dialog(c, lan_hosting() ? "End the session?" : "Leave the session?",
                "A local wireless game is on: it stops for the other players too (their game shows its own error).",
-               "Keep playing", LS.mode == BM_LAN_AUTO ? "Turn off" : "Disconnect", 1);
+               "Keep playing", lan_auto(LS.mode) ? "Turn off" : "Disconnect", 1);
 }
 
 static void show(int i) {
@@ -1524,7 +1530,7 @@ static void do_load(int n) {
 /* Local multiplayer's actions */
 static void lan_leave(void) {   /* Disconnect: a host's session ends (Off); a joined player goes back to looking.
                                   * Auto (Off, in a local wireless game): off, the session ends or is left */
-    if (LS.mode == BM_LAN_AUTO) {
+    if (lan_auto(LS.mode)) {
         mlog("[menu] LAN: off (in a local wireless game)\n");
         H.lan_set(H.ctx, BM_LAN_OFF, 0, ""); lan_pick = BM_LAN_OFF;
         lan_poll(); scr = SC_LAN; sel_lan = lan_mode_row(); play(SND_SELECT); dirty_top = dirty_bot = 1;
@@ -1562,7 +1568,7 @@ static void lan_activate(void) {
     if (id == LR_MODE && lan_pick != LS.mode) {
         scr = SC_LAN;
         mlog("[menu] LAN: %s\n", lan_pick == BM_LAN_HOST ? "host" : lan_pick == BM_LAN_JOIN ? "look for hosts"
-                                 : lan_pick == BM_LAN_AUTO ? "auto" : "off");
+                                 : lan_pick == BM_LAN_AUTO ? "auto" : lan_pick == BM_LAN_AUTO_JOIN ? "auto join" : "off");
         H.lan_set(H.ctx, lan_pick, lan_pick == BM_LAN_HOST ? lan_max_pick : 0, "");   /* (Auto: Host's size) */
         lan_poll(); play(SND_SELECT); dirty_bot = 1;
         if (lan_pick == BM_LAN_JOIN) { scr = SC_LAN_HOSTS; sel_host = top_host = 0; lan_joining = 0; }
@@ -1581,7 +1587,7 @@ static void lan_adjust(int d) {   /* left/right on the LAN page */
     lan_rows();
     const int id = lrows[sel_lan];
     if (id == LR_MODE && lan_auto_off_only()) {   /* Auto or Off */
-        lan_pick = lan_pick == BM_LAN_OFF ? BM_LAN_AUTO : BM_LAN_OFF; play(SND_MOVE); dirty_bot = 1;
+        lan_pick = lan_pick == BM_LAN_OFF ? LS.mode : BM_LAN_OFF; play(SND_MOVE); dirty_bot = 1;
     }
     else if (id == LR_MODE && !lan_locked() && !LS.no_net) {
         int k = 0;

@@ -157,11 +157,12 @@ int main(int argc, char** argv) {
                     if (!emu.load_rom(stub)) break;
                     continue;
                 }
-                // Auto discovery (lobby/discover, missing means on) starts this game on Auto.
-                // Auto is not written to wifi.local: it is not a saved room mode. Off leaves the
-                // game alone until BananaDS LAN's own menu changes it.
+                // Auto discovery (lobby/discover, missing means on) starts this game on Auto, and the
+                // DS menu (@firmware, Download Play) on Auto Join: it looks for the console sending a
+                // game and joins it, and never hosts. Neither is written to wifi.local: they are not
+                // saved modes. Off leaves the game alone until BananaDS LAN's own menu changes it.
                 if (emu.lan_status().mode == Emu::LanMode::Off && lobby_discover_on(cfg.str("wifi.lobbyctl_dir", "")))
-                    emu.lan_request(Emu::LanMode::Auto, "", 0);
+                    emu.lan_request(Emu::LanMode::Auto, "", 0, play == "@firmware");
                 emu.service_net();
                 // Banana Lobby: a fresh start. Slot 0 is the resume spot, not one of the eight
                 // menu slots, and a room must not pick the game up there. A BananaDS opened on

@@ -21,7 +21,8 @@ typedef struct {
 enum { BM_UNDO_SLOT = 9 };
 
 /* the Local multiplayer page (Quick settings > Local multiplayer: wifi.local, melonDS's LAN), as the frontend reports it */
-enum { BM_LAN_OFF, BM_LAN_HOST, BM_LAN_JOIN, BM_LAN_AUTO, BM_LAN_MODES };   /* (the page shows Off, Auto, Host, Join) */
+/* (the page shows Off, Auto, Auto Join, Host, Join). Auto Join: Auto that looks for a host and joins, and never hosts */
+enum { BM_LAN_OFF, BM_LAN_HOST, BM_LAN_JOIN, BM_LAN_AUTO, BM_LAN_AUTO_JOIN, BM_LAN_MODES };
 /* Auto's steps: waiting for the game to turn its wifi on, looking for hosts, joining one, hosting, joined, the game
  * online (Nintendo WFC: no local session), stopped by a problem (a UDP port taken: until the game's wifi goes off and
  * on, or Off then Auto) */
@@ -113,7 +114,7 @@ typedef struct {
     int (*live)(void* ctx);
     // Local multiplayer (Quick settings): lan_get fills st, 0 when this build has no LAN (no row). lan_set asks for a
     // mode: BM_LAN_HOST with max_players, BM_LAN_JOIN with a host's address to join it or "" to look for hosts,
-    // BM_LAN_AUTO (a session it hosts has Host's size; max_players unused), BM_LAN_OFF; the mode (not the address) is
+    // BM_LAN_AUTO (a session it hosts has Host's size; max_players unused), BM_LAN_AUTO_JOIN, BM_LAN_OFF; the mode (not the address) is
     // kept for the next game. It returns at once: lan_get says when it is done (a join can take 5 s). Mode changes only
     // outside a local wireless game (mp_lock, live), but for Off from Auto: the menu sees to it
     int (*lan_get)(void* ctx, bmenu_lan* st);

@@ -137,7 +137,8 @@ public:
     // menu's service loop (service_net), never while another thread runs the game. Joining waits up to 5 s for the
     // host (melonDS's StartClient): the state says Busy meanwhile, and the menu stays usable.
     enum class LanMode { Off, Host, Join, Auto };      // Join: looking for hosts, then in one host's session;
-                                                       // Auto: joins a host of this game, or hosts (lan_auto_tick)
+                                                       // Auto: joins a host of this game, or hosts (lan_auto_tick);
+                                                       // Auto Join (Auto, join_only): looks and joins, never hosts
     // Auto's steps: waiting for the game to turn its wifi on; listening for hosts; joining one; hosting; joined; the
     // game online through Nintendo WFC (no local session then); stopped by a problem (a UDP port taken: until the
     // game's wifi goes off for 3 s and on again, or Off then Auto). Auto has no Disconnect: Off leaves
@@ -157,6 +158,7 @@ public:
         std::vector<LanHost> hosts;      // Join, not joined: the hosts found on the network (each says so every 1 s)
         AutoPhase phase = AutoPhase::Wait;  // Auto: where it is
         bool host_untagged = false;      // Auto, joined: a host that doesn't say its game (desktop melonDS)
+        bool join_only = false;          // Auto: Auto Join (it looks for a host and joins; it never hosts)
         bool no_net = false;             // no network (Wi-Fi off or not connected): the mode waits for one
         bool on_direct_net = false;      // an address in 10.42.0.0/16 (another app's direct link): no latency warning
         // Connection is not in this build. These stay false; the page always uses the network the console is on.
@@ -168,7 +170,8 @@ public:
     };
     LanStatus lan_status() const;             // any thread: a copy
     // max_players: Host's (0: as it was); Auto hosts with Host's. Requests are carried out in order
-    void lan_request(LanMode mode, const std::string& addr = "", int max_players = 0);  // any thread
+    // join_only: with Auto, Auto Join (wifi.local = autojoin): it looks for a host and joins, and never hosts
+    void lan_request(LanMode mode, const std::string& addr = "", int max_players = 0, bool join_only = false);  // any thread
     // Connection: Direct (true) or Router; only with the mode Off (otherwise ignored). Any thread
     void lan_link_request(bool direct);
     bool lan_link_progress(std::string& phase, int& secs) const;  // the direct link starting: DirectLink::progress
@@ -278,7 +281,7 @@ private:
     std::mutex net_mu_;  // service_net() against the menu thread's save_state/load_state/restart (LAN Begin/End)
     mutable std::mutex lan_mu_;   // lan_st_ and lan_req_ (the menu's thread and the emulator's)
     LanStatus lan_st_;
-    struct LanReq { LanMode mode; std::string addr; int max_players; int link = -1; };  // link >= 0: Connection
+    struct LanReq { LanMode mode; std::string addr; int max_players; int link = -1; bool join_only = false; };  // link >= 0: Connection
     std::vector<LanReq> lan_req_;            // the menu's requests, not yet carried out (in order)
     void lan_apply_one(const LanReq& r);
 #ifdef BANANADS_LAN
@@ -291,6 +294,7 @@ private:
     char gamecode_[4] = {'#', '#', '#', '#'};  // the cart header's game code (the LAN beacon's tag)
     // Auto (emulator thread)
     bool auto_on_ = false;
+    bool auto_join_only_ = false;             // Auto Join: Auto that never hosts (it keeps looking instead)
     bool game_wifi_ = false;  // the game's antenna last frame (host/join: Begin when it turns on)
     bool auto_now_ = false;                   // wifi.local_auto_start = now: no wait for the game's wifi (tests)
     std::vector<std::pair<long, bool>> auto_test_wifi_;  // wifi.local_auto_test_wifi: the game's wifi by frame (tests)

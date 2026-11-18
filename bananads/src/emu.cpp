@@ -185,7 +185,8 @@ void Emu::setup_wifi() {
 // Local wireless with another handheld (Pokémon trades and battles, Mario Kart's local races, PictoChat):
 // wifi.local = host on one, join:<the host's address> (or join: look for hosts, and pick one in the in-game menu's
 // Local multiplayer page) on the other, or auto on both (lan_auto_tick). Both on the same network. The menu can
-// change it while the game runs (lan_request).
+// change it while the game runs (lan_request). autojoin: Auto that only joins: it looks for a host and joins it,
+// and never hosts (a console that should only receive, like the DS menu's Download Play).
 void Emu::setup_local() {
     // No saved wifi.local: Auto, for a game opened on its own. The room Banana Lobby keeps in the
     // background starts Off, even if a previous game left auto in the file: Lobby does not host or
@@ -222,15 +223,20 @@ void Emu::setup_local() {
                                lan_status().max_players))
         ;  // (no network: it starts when there is one)
     else if (mode == "host") lan_start_host(lan_status().max_players);
-    else if (mode == "auto") {
+    else if (mode == "auto" || mode == "autojoin") {
         auto_on_ = true;
+        auto_join_only_ = mode == "autojoin";
+        {
+            std::lock_guard<std::mutex> l(lan_mu_);
+            lan_st_.join_only = auto_join_only_;
+        }
         auto_read_config();
         lan_auto_phase(AutoPhase::Wait);
         Log(LogLevel::Info, "[wifi] local wireless auto: waiting for the game to turn its wifi on\n");
     }
     else if (mode == "join") lan_start_find("", "");
     else if (mode.rfind("join:", 0) == 0) lan_start_join(mode.substr(5));
-    else Log(LogLevel::Warn, "[wifi] wifi.local=%s: not off, auto, host, join or join:<address>\n", mode.c_str());
+    else Log(LogLevel::Warn, "[wifi] wifi.local=%s: not off, auto, autojoin, host, join or join:<address>\n", mode.c_str());
     game_wifi_ = nds_ && nds_->Wifi.IsPoweredOn();
     lan_refresh(true);
 #else
@@ -253,17 +259,20 @@ Emu::LanStatus Emu::lan_status() const {
     return lan_st_;
 }
 
-void Emu::lan_request(LanMode mode, const std::string& addr, int max_players) {
+void Emu::lan_request(LanMode mode, const std::string& addr, int max_players, bool join_only) {
     std::lock_guard<std::mutex> l(lan_mu_);
     if (!lan_st_.built) return;
     if (max_players < 2 || max_players > 16) max_players = lan_st_.host_players;
     // kept in order, all carried out: Off then Auto before the emulator's thread gets to them still ends the session
     // first (the latest alone would be Auto, already on: nothing done, the old session kept)
-    lan_req_.push_back(LanReq{mode, addr, max_players});
+    LanReq req{mode, addr, max_players};
+    req.join_only = mode == LanMode::Auto && join_only;
+    lan_req_.push_back(req);
     // what the menu shows until the emulator's thread has done it
     if (mode == LanMode::Auto) {  // (Auto: what it does shows once the emulator's thread has it)
         if (lan_st_.mode != LanMode::Auto) lan_st_.phase = AutoPhase::Wait;
         lan_st_.mode = mode;
+        lan_st_.join_only = join_only;
         lan_st_.msg.clear();
         lan_pending_.store(true, std::memory_order_release);
         return;
@@ -312,6 +321,13 @@ void Emu::lan_apply_one(const LanReq& r) {
     // A pause until the game's wifi went off and on couldn't tell MKDS's "Create group" (its wifi off for 3 s or more,
     // in its multiplayer menu) from its main menu and straight back (under 3 s).
     if (r.mode == LanMode::Auto) {
+        // Auto Join while Auto hosts: it starts afresh, looking (Auto Join never hosts). Otherwise the flag alone
+        if (auto_on_ && r.join_only && !auto_join_only_ && auto_phase_ == AutoPhase::Host) auto_on_ = false;
+        auto_join_only_ = r.join_only;
+        {
+            std::lock_guard<std::mutex> l(lan_mu_);
+            lan_st_.join_only = r.join_only;
+        }
         if (!auto_on_) {  // (already on: nothing to do; a session it hosts has Host's size, wifi.local_players)
             lan_stop();
             auto_on_ = true;
@@ -323,7 +339,7 @@ void Emu::lan_apply_one(const LanReq& r) {
                 lan_st_.hosts.clear();
                 lan_st_.players.clear();
             }
-            Log(LogLevel::Info, "[wifi] local wireless auto: on\n");
+            Log(LogLevel::Info, "[wifi] local wireless auto: on%s\n", auto_join_only_ ? " (join only)" : "");
             lan_auto_phase(AutoPhase::Wait);
             if (link_direct_) lan_link_ready(r);  // (Auto starts once it is up: net_ok_)
             lan_auto_tick();
@@ -1019,7 +1035,7 @@ void Emu::lan_auto_tick() {
             }
             if (by_hand || best) lan_auto_join(by_hand ? by_hand : best, true);
             else if (untagged) lan_auto_join(untagged, false);
-            else if (firmware_boot_) lan_auto_listen("");  // (the DS menu only joins: it looks again)
+            else if (firmware_boot_ || auto_join_only_) lan_auto_listen("");  // (Auto Join and the DS menu only join: it looks again)
             else lan_auto_host();
             break;
         }
